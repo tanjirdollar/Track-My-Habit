@@ -20,8 +20,19 @@ export interface Habit {
 export interface PodUser {
   id: string;
   name: string;
+  email?: string;
   role: 'userA' | 'userB';
   lastActive: number;
+}
+
+export interface AuthUserProfile {
+  uid: string;
+  email: string;
+  name: string;
+  role: 'userA' | 'userB';
+  podId: string;
+  partnerUid?: string;
+  partnerEmail?: string;
 }
 
 export interface WeekDaySync {

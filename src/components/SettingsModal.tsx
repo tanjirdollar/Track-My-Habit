@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, Flame, ShieldCheck, UserX, Bell, Share2 } from 'lucide-react';
-import type { ConnectionStatus, PodData, PodUser } from '../types';
+import { X, Copy, Check, Flame, ShieldCheck, UserX, Bell, Share2, LogIn, LogOut, User, Sparkles } from 'lucide-react';
+import type { ConnectionStatus, PodData, PodUser, AuthUserProfile } from '../types';
 import { showToast, requestNotificationPermission, sound } from '../services/notifications';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   pod: PodData;
-  myProfile: { id: string; name: string; role: 'userA' | 'userB'; podId: string };
+  myProfile: AuthUserProfile;
   connectionStatus: ConnectionStatus;
   notificationPermission: NotificationPermission;
   onOpenFirebaseConfig: () => void;
-  onPairPartner: (code: string) => void;
+  onOpenAuthModal: () => void;
+  onLogout: () => void;
+  onPairPartner: (codeOrEmail: string) => void;
   onUnpairPartner: () => void;
   onUpdateUserName: (name: string) => void;
 }
@@ -24,11 +26,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   connectionStatus,
   notificationPermission,
   onOpenFirebaseConfig,
+  onOpenAuthModal,
+  onLogout,
   onPairPartner,
   onUnpairPartner,
   onUpdateUserName,
 }) => {
-  const [partnerCodeInput, setPartnerCodeInput] = useState('');
+  const [partnerInput, setPartnerInput] = useState('');
   const [displayName, setDisplayName] = useState(myProfile.name || 'আমি');
   const [copied, setCopied] = useState(false);
 
@@ -36,28 +40,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const partner: PodUser | null = myProfile.role === 'userA' ? pod.userB : pod.userA;
   const isPaired = !!partner;
+  const isDemo = !myProfile.email || myProfile.uid.startsWith('demo_');
 
   const handleCopyCode = () => {
     sound.playTick();
-    const shareUrl = `${window.location.origin}${window.location.pathname}?pod=${myProfile.podId}&role=${myProfile.role === 'userA' ? 'userB' : 'userA'}`;
-    navigator.clipboard.writeText(shareUrl).then(() => {
-      setCopied(true);
-      showToast('পড লিংক কপি করা হয়েছে! 📋', 'পার্টনারকে এই লিংক বা কোড পাঠিয়ে দিলে তিনি সরাসরি পডে ঢুকতে পারবেন।', 'success');
-      setTimeout(() => setCopied(false), 2500);
-    }).catch(() => {
-      // Fallback
-      navigator.clipboard.writeText(myProfile.podId);
-      setCopied(true);
-      showToast('পড কোড কপি করা হয়েছে!', myProfile.podId, 'success');
-      setTimeout(() => setCopied(false), 2000);
-    });
+    const shareUrl = `${window.location.origin}${window.location.pathname}?pod=${myProfile.podId}`;
+    navigator.clipboard
+      .writeText(shareUrl)
+      .then(() => {
+        setCopied(true);
+        showToast('পড লিংক কপি করা হয়েছে! 📋', 'পার্টনারকে এই লিংক বা কোড পাঠিয়ে দিলে তিনি সরাসরি পডে ঢুকতে পারবেন।', 'success');
+        setTimeout(() => setCopied(false), 2500);
+      })
+      .catch(() => {
+        navigator.clipboard.writeText(myProfile.podId);
+        setCopied(true);
+        showToast('পড কোড কপি করা হয়েছে!', myProfile.podId, 'success');
+        setTimeout(() => setCopied(false), 2000);
+      });
   };
 
   const handleConnectPartner = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!partnerCodeInput.trim()) return;
-    onPairPartner(partnerCodeInput.trim().toUpperCase());
-    setPartnerCodeInput('');
+    if (!partnerInput.trim()) return;
+    onPairPartner(partnerInput.trim());
+    setPartnerInput('');
   };
 
   const handleSaveName = (e: React.FormEvent) => {
@@ -80,11 +87,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* Header */}
         <div className="p-4 sm:p-5 flex items-center justify-between border-b border-white/5">
           <h3 className="text-lg font-bold text-white tracking-wide">
-            পড ও অ্যাপ সেটিংস
+            পড ও অ্যাকাউন্ট সেটিংস
           </h3>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+            className="p-1.5 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -92,7 +99,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Body */}
         <div className="p-4 sm:p-6 space-y-4 overflow-y-auto">
-          {/* 1. Firebase Cloud Sync Status Card */}
+          {/* 1. Account Section */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-rose-500/10 via-transparent to-transparent border border-rose-500/20 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-300 font-bold">
+                  <User className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    {myProfile.name || 'ইউজার'}
+                    {isDemo && (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-normal">
+                        ডেমো মোড
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    {myProfile.email || 'কোনো ইমেইল যুক্ত নেই'}
+                  </p>
+                </div>
+              </div>
+
+              {isDemo ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenAuthModal();
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>লগইন / সাইন আপ</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-rose-500/20 hover:text-rose-300 text-slate-300 text-xs font-semibold border border-white/10 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>লগআউট</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 2. Firebase Cloud Sync Status Card */}
           <div className="p-4 rounded-2xl bg-white/5 border border-white/8 space-y-3">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-3">
@@ -106,7 +160,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <p className="text-xs text-slate-400 mt-0.5">
                     {connectionStatus === 'connected' ? (
                       <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                        <ShieldCheck className="w-3.5 h-3.5" /> ক্লাউড ফায়ারস্টোর লাইভ সিঙ্ক সক্রিয়
+                        <ShieldCheck className="w-3.5 h-3.5" /> habit-tracker-931a6-ff2dc ক্লাউড লাইভ সিঙ্ক সক্রিয়
                       </span>
                     ) : connectionStatus === 'connecting' ? (
                       <span className="text-amber-400 font-semibold">ফায়ারবেসের সাথে সংযুক্ত হচ্ছে...</span>
@@ -120,28 +174,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 onClick={onOpenFirebaseConfig}
-                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-slate-200 border border-white/10 transition-all cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-slate-200 border border-white/10 transition-all cursor-pointer shrink-0"
               >
-                {connectionStatus === 'connected' ? 'কনফিগ দেখুন' : 'কনফিগ যুক্ত করুন'}
+                কনফিগ দেখুন
               </button>
             </div>
           </div>
 
-          {/* 2. Duo Pod Pairing Card */}
+          {/* 3. Duo Pod Pairing Card */}
           <div className="p-4 rounded-2xl bg-white/5 border border-white/8 space-y-4">
             <div>
               <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
                 পার্টনার পড কানেকশন (Duo Pod)
               </h4>
               <p className="text-xs text-slate-400 mt-0.5">
-                আপনার পার্টনারের সাথে লাইভ কানেক্ট হতে নিজের কোড/লিংক দিন অথবা পার্টনারের কোড লিখুন।
+                পার্টনারকে এই পড কোড বা শেয়ার লিংক দিন, অথবা নিচে পার্টনারের কোড বা ইমেইল লিখুন।
               </p>
             </div>
 
             {/* My Invite Code Box */}
             <div className="p-3.5 rounded-xl bg-[#0f1424] border border-white/10 space-y-1.5">
               <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-                আপনার পড কোড ও লিংক
+                আপনার পড কোড ও শেয়ার লিংক
               </label>
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-base font-bold text-rose-400 tracking-wider">
@@ -167,24 +221,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
 
-            {/* Partner Code Entry (If not paired) */}
+            {/* Partner Code or Email Entry */}
             {!isPaired ? (
               <form onSubmit={handleConnectPartner} className="space-y-2">
                 <label className="text-xs font-semibold text-slate-300 block">
-                  পার্টনারের পড কোড লিখুন
+                  পার্টনারের পড কোড বা ইমেইল ঠিকানা
                 </label>
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
-                    value={partnerCodeInput}
-                    onChange={(e) => setPartnerCodeInput(e.target.value)}
-                    placeholder="যেমন: D-88231"
-                    maxLength={10}
-                    className="flex-1 p-2.5 rounded-xl bg-white/5 border border-white/10 text-white font-mono text-sm uppercase focus:outline-none focus:border-cyan-400"
+                    value={partnerInput}
+                    onChange={(e) => setPartnerInput(e.target.value)}
+                    placeholder="যেমন: POD-XXXXX বা partner@mail.com"
+                    className="flex-1 p-2.5 rounded-xl bg-white/5 border border-white/10 text-white font-mono text-xs sm:text-sm focus:outline-none focus:border-cyan-400"
                   />
                   <button
                     type="submit"
-                    className="px-4 py-2.5 rounded-xl bg-cyan-500 text-slate-900 font-bold text-xs hover:bg-cyan-400 transition-all cursor-pointer"
+                    className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-bold text-xs transition-all cursor-pointer shrink-0"
                   >
                     কানেক্ট
                   </button>
@@ -200,7 +253,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       সংযুক্ত আছেন: {partner?.name}
                     </p>
                     <p className="text-[10px] text-slate-400">
-                      উভয়ের যেকোনো ইনপুট তাৎক্ষণিক সিঙ্ক হচ্ছে।
+                      {partner?.email ? partner.email : 'উভয়ের ইনপুট তাৎক্ষণিক সিঙ্ক হচ্ছে।'}
                     </p>
                   </div>
                 </div>
@@ -208,7 +261,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <button
                   type="button"
                   onClick={onUnpairPartner}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition-all cursor-pointer"
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition-all cursor-pointer shrink-0"
                   title="পার্টনারকে পড থেকে রিমুভ করুন"
                 >
                   <UserX className="w-3.5 h-3.5" />
@@ -218,7 +271,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             )}
           </div>
 
-          {/* 3. Push Notifications Permission Card */}
+          {/* 4. Push Notifications Permission Card */}
           <div className="p-4 rounded-2xl bg-white/5 border border-white/8 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="p-2 rounded-xl bg-blue-500/15 text-blue-400 border border-blue-500/20">
@@ -239,7 +292,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <button
               type="button"
               onClick={handleRequestNotif}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
                 notificationPermission === 'granted'
                   ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
                   : 'bg-blue-500 text-white hover:bg-blue-600 border-transparent'
@@ -249,28 +302,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
 
-          {/* 4. User Profile Details */}
+          {/* 5. User Profile Display Name */}
           <div className="p-4 rounded-2xl bg-white/5 border border-white/8 space-y-3">
-            <h4 className="text-sm font-bold text-white">আপনার প্রোফাইল তথ্য</h4>
+            <h4 className="text-sm font-bold text-white">প্রদর্শিত নাম পরিবর্তন</h4>
             <form onSubmit={handleSaveName} className="space-y-3">
-              <div>
-                <label className="text-xs font-semibold text-slate-300 mb-1.5 block">
-                  আপনার প্রদর্শিত নাম
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    className="flex-1 p-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-rose-500"
-                  />
-                  <button
-                    type="submit"
-                    className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-slate-200 border border-white/10 transition-all cursor-pointer"
-                  >
-                    আপডেট করুন
-                  </button>
-                </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="flex-1 p-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-rose-500"
+                />
+                <button
+                  type="submit"
+                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-slate-200 border border-white/10 transition-all cursor-pointer shrink-0"
+                >
+                  আপডেট করুন
+                </button>
               </div>
             </form>
           </div>

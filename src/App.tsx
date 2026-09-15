@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { PodData, Habit, ConnectionStatus } from './types';
+import type { PodData, Habit, ConnectionStatus, AuthUserProfile } from './types';
 import {
   getCurrentUserProfile,
   saveUserProfile,
   initPodSync,
   syncPodData,
-  pairPartner,
+  pairPartnerByCodeOrEmail,
   unpairPartner,
   createInitialPod,
+  subscribeToAuth,
+  logoutUser,
 } from './services/firebase';
 import { Header } from './components/Header';
 import { PartnerBar } from './components/PartnerBar';
@@ -18,25 +20,37 @@ import { LogInputModal } from './components/LogInputModal';
 import { CelebrationModal } from './components/CelebrationModal';
 import { SettingsModal } from './components/SettingsModal';
 import { FirebaseModal } from './components/FirebaseModal';
+import { AuthModal } from './components/AuthModal';
 import { ToastBanner } from './components/ToastBanner';
 import { sound, showToast } from './services/notifications';
-import { LayoutDashboard, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, BarChart3, LogIn, Sparkles } from 'lucide-react';
 import { toBengaliNumber } from './utils/bengali';
 
 export default function App() {
-  const [myProfile, setMyProfile] = useState(() => getCurrentUserProfile());
+  const [myProfile, setMyProfile] = useState<AuthUserProfile>(() => getCurrentUserProfile());
   const [pod, setPod] = useState<PodData>(() => createInitialPod(myProfile.podId, myProfile.name));
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('demo');
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'insights'>('dashboard');
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
 
   // Modals state
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isAddGoalOpen, setIsAddGoalOpen] = useState(false);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const [selectedHabitForLog, setSelectedHabitForLog] = useState<Habit | null>(null);
   const [isCelebrationOpen, setIsCelebrationOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFirebaseConfigOpen, setIsFirebaseConfigOpen] = useState(false);
+
+  // Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubAuth = subscribeToAuth((user) => {
+      if (user) {
+        setMyProfile(user);
+      }
+    });
+    return () => unsubAuth();
+  }, []);
 
   // Check notification permission on mount
   useEffect(() => {
@@ -49,6 +63,7 @@ export default function App() {
   useEffect(() => {
     const unsub = initPodSync(
       myProfile.podId,
+      myProfile,
       (updatedData) => {
         setPod(updatedData);
       },
@@ -60,7 +75,7 @@ export default function App() {
     return () => {
       unsub();
     };
-  }, [myProfile.podId]);
+  }, [myProfile.podId, myProfile.uid, myProfile.role]);
 
   const isUserA = myProfile.role === 'userA';
 
@@ -96,7 +111,7 @@ export default function App() {
           const targetReached = newProgress >= h.target;
           if (targetReached && (isUserA ? h.myProgress < h.target : h.partnerProgress < h.target)) {
             sound.playCompletion();
-            showToast(`${h.name} সম্পন্ন হয়েছে! 🎉`, `${myProfile.name} টার্গেট পূরণ করেছেন।`, 'celebrate');
+            showToast(`${h.name} সম্পন্ন হয়েছে! 🎉`, `${myProfile.name} লক্ষ্য পূরণ করেছেন।`, 'celebrate');
           }
 
           return {
@@ -115,9 +130,9 @@ export default function App() {
           habits: updatedHabits,
           healthScore: newScore,
           lastAction: {
-            userId: myProfile.id,
+            userId: myProfile.uid,
             userName: myProfile.name,
-            actionText: `${targetHabit?.name || 'লক্ষ্য'}-এ নতুন অগ্রগতি যোগ করেছেন`,
+            actionText: `${targetHabit?.name || 'লক্ষ্য'}-এ নতুন অগ্রগতি ইনপুট করেছেন`,
             habitName: targetHabit?.name,
             timestamp: Date.now(),
           },
@@ -157,11 +172,11 @@ export default function App() {
           habits: updatedHabits,
           healthScore: calculateHealthScore(updatedHabits),
           lastAction: {
-            userId: myProfile.id,
+            userId: myProfile.uid,
             userName: myProfile.name,
             actionText: isNowDone
               ? `${targetHabit?.name} সম্পন্ন করেছেন! ✓`
-              : `${targetHabit?.name} অসম্পন্ন হিসেবে চিহ্নিত করেছেন`,
+              : `${targetHabit?.name} টিক চিহ্ন প্রত্যাহার করেছেন`,
             habitName: targetHabit?.name,
             timestamp: Date.now(),
           },
@@ -194,7 +209,7 @@ export default function App() {
           ...prev,
           habits: [...prev.habits, newHabit],
           lastAction: {
-            userId: myProfile.id,
+            userId: myProfile.uid,
             userName: myProfile.name,
             actionText: `নতুন লক্ষ্য যুক্ত করেছেন: "${newHabit.name}"`,
             habitName: newHabit.name,
@@ -220,9 +235,9 @@ export default function App() {
           ...prev,
           habits: prev.habits.filter((h) => h.id !== habitId),
           lastAction: {
-            userId: myProfile.id,
+            userId: myProfile.uid,
             userName: myProfile.name,
-            actionText: `লক্ষ্যটি মুছে ফেলেছেন: "${habitToDelete?.name || ''}"`,
+            actionText: `লক্ষ্য মুছে ফেলেছেন: "${habitToDelete?.name || ''}"`,
             timestamp: Date.now(),
           },
         };
@@ -235,8 +250,8 @@ export default function App() {
   );
 
   // Pair partner
-  const handlePairPartner = async (partnerCode: string) => {
-    const updated = await pairPartner(pod, partnerCode, myProfile);
+  const handlePairPartner = async (partnerCodeOrEmail: string) => {
+    const updated = await pairPartnerByCodeOrEmail(pod, partnerCodeOrEmail, myProfile);
     setPod(updated);
   };
 
@@ -250,26 +265,36 @@ export default function App() {
   const handleSwitchPerspective = () => {
     sound.playTick();
     const newRole = myProfile.role === 'userA' ? 'userB' : 'userA';
-    const newProfile = {
+    const newProfile: AuthUserProfile = {
       ...myProfile,
       role: newRole,
-      name: newRole === 'userA' ? 'আমি' : 'পার্টনার',
+      name: myProfile.name || (newRole === 'userA' ? 'আমি' : 'পার্টনার'),
     };
     setMyProfile(newProfile);
     saveUserProfile(newProfile);
     showToast(
-      `পারস্পেক্টিভ পরিবর্তিত: ${newProfile.name}`,
-      'এখন আপনি দেখতে পাচ্ছেন পার্টনারের দিক থেকে স্ক্রিন কেমন দেখায়!',
+      `ভিউ পরিবর্তিত: ${newRole === 'userA' ? 'আমি (User A)' : 'পার্টনার (User B)'}`,
+      'এখন আপনি দেখতে পাচ্ছেন পার্টনারের দিক থেকে স্ক্রিন ও ইনপুট কেমন কাজ করে!',
       'info'
     );
   };
 
   // Update user name
   const handleUpdateUserName = (newName: string) => {
-    const newProfile = { ...myProfile, name: newName };
+    const newProfile: AuthUserProfile = { ...myProfile, name: newName };
     setMyProfile(newProfile);
     saveUserProfile(newProfile);
   };
+
+  // Logout user
+  const handleLogout = async () => {
+    await logoutUser();
+    const demo = getCurrentUserProfile();
+    setMyProfile(demo);
+    showToast('লগআউট সম্পন্ন হয়েছে', 'আপনি এখন ডেমো অ্যাকাউন্ট হিসেবে আছেন।', 'info');
+  };
+
+  const isDemo = !myProfile.email || myProfile.uid.startsWith('demo_');
 
   return (
     <div className="min-h-screen bg-[#0b0e17] text-slate-100 flex flex-col selection:bg-rose-500 selection:text-white">
@@ -280,10 +305,31 @@ export default function App() {
       <Header
         currentStreak={pod.currentStreak || 12}
         connectionStatus={connectionStatus}
+        currentUser={myProfile}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenCelebration={() => setIsCelebrationOpen(true)}
+        onOpenAuth={() => setIsAuthOpen(true)}
         notificationPermission={notificationPermission}
       />
+
+      {/* Account Reminder Banner if Demo */}
+      {isDemo && (
+        <aside aria-label="Account login banner" className="mx-4 mt-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-transparent border border-amber-500/20 flex items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 text-amber-200">
+            <Sparkles className="w-4 h-4 shrink-0 text-amber-400" />
+            <span>
+              পার্টনারের সাথে আলাদা অ্যাকাউন্টে লাইভ সিঙ্ক করতে লগইন করুন
+            </span>
+          </div>
+          <button
+            onClick={() => setIsAuthOpen(true)}
+            className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold border border-amber-500/30 transition-all cursor-pointer shrink-0 flex items-center gap-1"
+          >
+            <LogIn className="w-3 h-3" />
+            <span>লগইন / সাইন আপ</span>
+          </button>
+        </aside>
+      )}
 
       {/* Partner Status Bar */}
       <div className="max-w-2xl w-full mx-auto">
@@ -342,6 +388,15 @@ export default function App() {
         </button>
       </nav>
 
+      {/* Auth Modal (Login / Sign Up) */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        onAuthSuccess={(user) => {
+          setMyProfile(user);
+        }}
+      />
+
       {/* Modals */}
       <AddGoalModal
         isOpen={isAddGoalOpen}
@@ -377,6 +432,10 @@ export default function App() {
           setIsSettingsOpen(false);
           setIsFirebaseConfigOpen(true);
         }}
+        onOpenAuthModal={() => {
+          setIsAuthOpen(true);
+        }}
+        onLogout={handleLogout}
         onPairPartner={handlePairPartner}
         onUnpairPartner={handleUnpairPartner}
         onUpdateUserName={handleUpdateUserName}
@@ -386,7 +445,6 @@ export default function App() {
         isOpen={isFirebaseConfigOpen}
         onClose={() => setIsFirebaseConfigOpen(false)}
         onConfigSaved={() => {
-          // Re-trigger sync by toggling podId or connection state
           setMyProfile((prev) => ({ ...prev }));
         }}
       />
