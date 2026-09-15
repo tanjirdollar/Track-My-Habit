@@ -1,0 +1,6 @@
+{
+  "name": "একসাথে | Duo Pod",
+  "description": "Firebase-ভিত্তিক রিয়েল-টাইম পার্টনার হ্যাবিট ট্র্যাকিং ও সিঙ্ক্রোনাইজেশন ওয়েব অ্যাপ্লিকেশন।",
+  "requestFramePermissions": ["notifications"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
