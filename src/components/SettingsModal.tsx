@@ -1,94 +1,76 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, Flame, ShieldCheck, UserX, Bell, Share2, LogIn, LogOut, User, Sparkles } from 'lucide-react';
-import type { ConnectionStatus, PodData, PodUser, AuthUserProfile } from '../types';
-import { showToast, requestNotificationPermission, sound } from '../services/notifications';
+import { X, Copy, Check, LogOut, LogIn, Users, Shield, Link2, ExternalLink, HelpCircle, CheckCircle } from 'lucide-react';
+import type { UserProfile } from '../types';
+import { logoutUser, disconnectPartner } from '../services/firebase';
+import { showToast, sound } from '../services/notifications';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  pod: PodData;
-  myProfile: AuthUserProfile;
-  connectionStatus: ConnectionStatus;
-  notificationPermission: NotificationPermission;
-  onOpenFirebaseConfig: () => void;
-  onOpenAuthModal: () => void;
+  currentUser: UserProfile;
   onLogout: () => void;
-  onPairPartner: (codeOrEmail: string) => void;
-  onUnpairPartner: () => void;
-  onUpdateUserName: (name: string) => void;
+  onOpenAuth: () => void;
+  onOpenConnect: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
-  pod,
-  myProfile,
-  connectionStatus,
-  notificationPermission,
-  onOpenFirebaseConfig,
-  onOpenAuthModal,
+  currentUser,
   onLogout,
-  onPairPartner,
-  onUnpairPartner,
-  onUpdateUserName,
+  onOpenAuth,
+  onOpenConnect,
 }) => {
-  const [partnerInput, setPartnerInput] = useState('');
-  const [displayName, setDisplayName] = useState(myProfile.name || 'আমি');
-  const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const isDemo = currentUser.uid.startsWith('demo_');
+  const isConnected = !!currentUser.partnerUid;
 
   if (!isOpen) return null;
 
-  const partner: PodUser | null = myProfile.role === 'userA' ? pod.userB : pod.userA;
-  const isPaired = !!partner;
-  const isDemo = !myProfile.email || myProfile.uid.startsWith('demo_');
-
   const handleCopyCode = () => {
+    navigator.clipboard.writeText(currentUser.inviteCode);
+    setCopiedCode(true);
     sound.playTick();
-    const shareUrl = `${window.location.origin}${window.location.pathname}?pod=${myProfile.podId}`;
-    navigator.clipboard
-      .writeText(shareUrl)
-      .then(() => {
-        setCopied(true);
-        showToast('পড লিংক কপি করা হয়েছে! 📋', 'পার্টনারকে এই লিংক বা কোড পাঠিয়ে দিলে তিনি সরাসরি পডে ঢুকতে পারবেন।', 'success');
-        setTimeout(() => setCopied(false), 2500);
-      })
-      .catch(() => {
-        navigator.clipboard.writeText(myProfile.podId);
-        setCopied(true);
-        showToast('পড কোড কপি করা হয়েছে!', myProfile.podId, 'success');
-        setTimeout(() => setCopied(false), 2000);
-      });
+    showToast('ইনভাইট কোড কপি হয়েছে! 📋', currentUser.inviteCode, 'info');
+    setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  const handleConnectPartner = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!partnerInput.trim()) return;
-    onPairPartner(partnerInput.trim());
-    setPartnerInput('');
+  const handleSignOut = async () => {
+    await logoutUser();
+    onLogout();
+    onClose();
+    showToast('লগআউট সম্পন্ন হয়েছে', 'আপনি লোকাল ডেমো মোডে ফিরে গেছেন।', 'info');
   };
 
-  const handleSaveName = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!displayName.trim()) return;
-    onUpdateUserName(displayName.trim());
-    showToast('নাম আপডেট সম্পন্ন হয়েছে', displayName.trim(), 'success');
-  };
-
-  const handleRequestNotif = async () => {
-    await requestNotificationPermission();
+  const handleUnpair = async () => {
+    if (window.confirm('আপনি কি নিশ্চিত যে পার্টনারের সাথে সংযোগ বিচ্ছিন্ন করতে চান?')) {
+      await disconnectPartner(currentUser);
+      showToast('পার্টনার সংযোগ বিচ্ছিন্ন করা হয়েছে', '', 'info');
+      onClose();
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-lg bg-[#141b2d] border border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
-        {/* Grabber */}
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+      <div className="w-full max-w-lg bg-[#131929] border border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        {/* Mobile Grabber */}
         <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mt-3 sm:hidden" />
 
         {/* Header */}
         <div className="p-4 sm:p-5 flex items-center justify-between border-b border-white/5">
-          <h3 className="text-lg font-bold text-white tracking-wide">
-            পড ও অ্যাকাউন্ট সেটিংস
-          </h3>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-white font-bold text-sm">
+              ⚙️
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white tracking-wide">
+                অ্যাপ সেটিংস ও প্রোফাইল
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                অ্যাকাউন্ট ও পার্টনার সিঙ্ক্রোনাইজেশন
+              </p>
+            </div>
+          </div>
           <button
             onClick={onClose}
             className="p-1.5 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
@@ -97,230 +79,157 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        {/* Body */}
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto">
-          {/* 1. Account Section */}
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-rose-500/10 via-transparent to-transparent border border-rose-500/20 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-300 font-bold">
-                  <User className="w-5 h-5" />
+        <div className="p-4 sm:p-6 space-y-5 overflow-y-auto">
+          {/* User Profile Card */}
+          <div className="p-4 rounded-2xl bg-[#0c101c] border border-white/5 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                আপনার অ্যাকাউন্ট
+              </span>
+              {isDemo ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold">
+                  ডেমো অ্যাকাউন্ট
+                </span>
+              ) : (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3" />
+                  গুগল অ্যাকাউন্ট সক্রিয়
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              {currentUser.photoURL ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.name}
+                  className="w-12 h-12 rounded-2xl object-cover border border-white/20"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-rose-500 to-amber-500 flex items-center justify-center text-white font-bold text-lg shadow-md">
+                  {currentUser.name.charAt(0)}
                 </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                    {myProfile.name || 'ইউজার'}
-                    {isDemo && (
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-normal">
-                        ডেমো মোড
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-xs text-slate-400">
-                    {myProfile.email || 'কোনো ইমেইল যুক্ত নেই'}
-                  </p>
-                </div>
+              )}
+
+              <div className="flex-1 min-w-0">
+                <h4 className="text-sm font-bold text-white truncate">
+                  {currentUser.name}
+                </h4>
+                <p className="text-xs text-slate-400 truncate">
+                  {currentUser.email || 'কোনো ইমেইল যুক্ত নেই'}
+                </p>
               </div>
 
               {isDemo ? (
                 <button
-                  type="button"
                   onClick={() => {
                     onClose();
-                    onOpenAuthModal();
+                    onOpenAuth();
                   }}
-                  className="px-3.5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-bold text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5"
                 >
                   <LogIn className="w-3.5 h-3.5" />
-                  <span>লগইন / সাইন আপ</span>
+                  <span>লগইন</span>
                 </button>
               ) : (
                 <button
-                  type="button"
-                  onClick={onLogout}
-                  className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-rose-500/20 hover:text-rose-300 text-slate-300 text-xs font-semibold border border-white/10 transition-all cursor-pointer flex items-center gap-1.5"
+                  onClick={handleSignOut}
+                  className="p-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 hover:text-rose-200 transition-colors cursor-pointer"
+                  title="লগআউট"
                 >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>লগআউট</span>
+                  <LogOut className="w-4 h-4" />
                 </button>
               )}
             </div>
           </div>
 
-          {/* 2. Firebase Cloud Sync Status Card */}
-          <div className="p-4 rounded-2xl bg-white/5 border border-white/8 space-y-3">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-center gap-3">
-                <span className="text-2xl p-2 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/20">
-                  🔥
-                </span>
-                <div>
-                  <h4 className="text-sm font-bold text-white">
-                    ফায়ারবেস ক্লাউড সংযোগ
-                  </h4>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {connectionStatus === 'connected' ? (
-                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                        <ShieldCheck className="w-3.5 h-3.5" /> habit-tracker-931a6-ff2dc ক্লাউড লাইভ সিঙ্ক সক্রিয়
-                      </span>
-                    ) : connectionStatus === 'connecting' ? (
-                      <span className="text-amber-400 font-semibold">ফায়ারবেসের সাথে সংযুক্ত হচ্ছে...</span>
-                    ) : (
-                      <span>লোকাল ও ব্রডকাস্ট রিয়েল-টাইম মোডে চলছে</span>
-                    )}
-                  </p>
+          {/* Partner & Connection Section */}
+          <div className="p-4 rounded-2xl bg-[#0c101c] border border-white/5 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                পার্টনার কানেকশন
+              </span>
+              <span className="text-xs text-indigo-400 font-mono font-bold">
+                কোড: {currentUser.inviteCode}
+              </span>
+            </div>
+
+            {isConnected ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-xs">
+                      {(currentUser.partnerName || 'P').charAt(0)}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white">
+                        {currentUser.partnerName || 'পার্টনার'}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {currentUser.partnerEmail || 'রিয়েল-টাইম ক্লাউড সিঙ্ক সক্রিয়'}
+                      </div>
+                    </div>
+                  </div>
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 </div>
-              </div>
 
-              <button
-                type="button"
-                onClick={onOpenFirebaseConfig}
-                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-slate-200 border border-white/10 transition-all cursor-pointer shrink-0"
-              >
-                কনফিগ দেখুন
-              </button>
-            </div>
-          </div>
-
-          {/* 3. Duo Pod Pairing Card */}
-          <div className="p-4 rounded-2xl bg-white/5 border border-white/8 space-y-4">
-            <div>
-              <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
-                পার্টনার পড কানেকশন (Duo Pod)
-              </h4>
-              <p className="text-xs text-slate-400 mt-0.5">
-                পার্টনারকে এই পড কোড বা শেয়ার লিংক দিন, অথবা নিচে পার্টনারের কোড বা ইমেইল লিখুন।
-              </p>
-            </div>
-
-            {/* My Invite Code Box */}
-            <div className="p-3.5 rounded-xl bg-[#0f1424] border border-white/10 space-y-1.5">
-              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-                আপনার পড কোড ও শেয়ার লিংক
-              </label>
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-base font-bold text-rose-400 tracking-wider">
-                  {myProfile.podId}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleCopyCode}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition-all cursor-pointer"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>কপি হয়েছে!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Share2 className="w-3.5 h-3.5" />
-                      <span>শেয়ার লিংক কপি</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Partner Code or Email Entry */}
-            {!isPaired ? (
-              <form onSubmit={handleConnectPartner} className="space-y-2">
-                <label className="text-xs font-semibold text-slate-300 block">
-                  পার্টনারের পড কোড বা ইমেইল ঠিকানা
-                </label>
                 <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={partnerInput}
-                    onChange={(e) => setPartnerInput(e.target.value)}
-                    placeholder="যেমন: POD-XXXXX বা partner@mail.com"
-                    className="flex-1 p-2.5 rounded-xl bg-white/5 border border-white/10 text-white font-mono text-xs sm:text-sm focus:outline-none focus:border-cyan-400"
-                  />
                   <button
-                    type="submit"
-                    className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-bold text-xs transition-all cursor-pointer shrink-0"
+                    onClick={() => {
+                      onClose();
+                      onOpenConnect();
+                    }}
+                    className="flex-1 py-2 px-3 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold text-center transition-colors cursor-pointer"
                   >
-                    কানেক্ট
+                    কানেকশন বিস্তারিত
+                  </button>
+                  <button
+                    onClick={handleUnpair}
+                    className="py-2 px-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    বিচ্ছিন্ন হন
                   </button>
                 </div>
-              </form>
+              </div>
             ) : (
-              /* Paired Status Panel with Unpair Button */
-              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
-                  <div>
-                    <p className="text-xs font-bold text-emerald-300">
-                      সংযুক্ত আছেন: {partner?.name}
-                    </p>
-                    <p className="text-[10px] text-slate-400">
-                      {partner?.email ? partner.email : 'উভয়ের ইনপুট তাৎক্ষণিক সিঙ্ক হচ্ছে।'}
-                    </p>
-                  </div>
-                </div>
-
+              <div className="space-y-2">
+                <p className="text-xs text-slate-400">
+                  বর্তমানে কোনো পার্টনার যুক্ত নেই। আপনার ইনভাইট কোড শেয়ার করে অথবা পার্টনারের কোড দিয়ে কানেক্ট করুন।
+                </p>
                 <button
-                  type="button"
-                  onClick={onUnpairPartner}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition-all cursor-pointer shrink-0"
-                  title="পার্টনারকে পড থেকে রিমুভ করুন"
+                  onClick={() => {
+                    onClose();
+                    onOpenConnect();
+                  }}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white text-xs font-bold shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
-                  <UserX className="w-3.5 h-3.5" />
-                  <span>বিচ্ছিন্ন হন</span>
+                  <Link2 className="w-3.5 h-3.5" />
+                  <span>পার্টনারকে যুক্ত করুন (Connect)</span>
                 </button>
               </div>
             )}
           </div>
 
-          {/* 4. Push Notifications Permission Card */}
-          <div className="p-4 rounded-2xl bg-white/5 border border-white/8 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span className="p-2 rounded-xl bg-blue-500/15 text-blue-400 border border-blue-500/20">
-                <Bell className="w-4 h-4" />
-              </span>
-              <div>
-                <h4 className="text-sm font-bold text-white">
-                  পুশ নোটিফিকেশন
-                </h4>
-                <p className="text-xs text-slate-400">
-                  {notificationPermission === 'granted'
-                    ? 'নোটিফিকেশন সক্রিয় রয়েছে (Alert on)'
-                    : 'পার্টনারের অ্যাকশন রিয়েল-টাইমে জানতে'}
-                </p>
-              </div>
+          {/* Firebase Configuration Info & Setup Instructions */}
+          <div className="p-4 rounded-2xl bg-indigo-950/20 border border-indigo-500/20 space-y-2.5 text-xs text-slate-300">
+            <div className="flex items-center gap-2 font-bold text-white">
+              <Shield className="w-4 h-4 text-indigo-400" />
+              <span>Firebase Console প্রয়োজনীয় নির্দেশনা</span>
             </div>
-
-            <button
-              type="button"
-              onClick={handleRequestNotif}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-                notificationPermission === 'granted'
-                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                  : 'bg-blue-500 text-white hover:bg-blue-600 border-transparent'
-              }`}
-            >
-              {notificationPermission === 'granted' ? 'সক্রিয় ✓' : 'অনুমতি দিন'}
-            </button>
-          </div>
-
-          {/* 5. User Profile Display Name */}
-          <div className="p-4 rounded-2xl bg-white/5 border border-white/8 space-y-3">
-            <h4 className="text-sm font-bold text-white">প্রদর্শিত নাম পরিবর্তন</h4>
-            <form onSubmit={handleSaveName} className="space-y-3">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  className="flex-1 p-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-rose-500"
-                />
-                <button
-                  type="submit"
-                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-slate-200 border border-white/10 transition-all cursor-pointer shrink-0"
-                >
-                  আপডেট করুন
-                </button>
-              </div>
-            </form>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              গুগল লগইন ও ফায়ারস্টোর লাইভ সিঙ্কের জন্য আপনার Firebase Console-এ নিচের বিষয়গুলো নিশ্চিত করুন:
+            </p>
+            <ul className="space-y-1.5 text-[11px] text-slate-300 list-disc list-inside">
+              <li>
+                <strong>Authentication &gt; Sign-in method:</strong> Google সক্রিয় (Enable) করুন।
+              </li>
+              <li>
+                <strong>Authentication &gt; Settings &gt; Authorized Domains:</strong> অ্যাপের হোস্ট ডোমেনগুলো যুক্ত করুন।
+              </li>
+              <li>
+                <strong>Firestore Database:</strong> ডাটাবেজ তৈরি করে Rules ট্যাবে সিকিউরিটি রুলস সেভ করুন।
+              </li>
+            </ul>
           </div>
         </div>
       </div>

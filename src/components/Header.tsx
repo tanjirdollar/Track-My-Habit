@@ -1,127 +1,135 @@
 import React from 'react';
-import { Settings, Bell, User, LogIn } from 'lucide-react';
+import { Sparkles, Settings, LogIn, Users, Link2, LogOut, Flame, ShieldCheck } from 'lucide-react';
+import type { UserProfile, ConnectionStatus } from '../types';
 import { formatBengaliDate, toBengaliNumber } from '../utils/bengali';
-import type { ConnectionStatus, AuthUserProfile } from '../types';
-import { requestNotificationPermission, showToast } from '../services/notifications';
 
 interface HeaderProps {
-  currentStreak: number;
+  currentUser: UserProfile;
   connectionStatus: ConnectionStatus;
-  currentUser: AuthUserProfile | null;
+  streak: number;
   onOpenSettings: () => void;
-  onOpenCelebration: () => void;
   onOpenAuth: () => void;
-  notificationPermission: NotificationPermission;
+  onOpenConnect: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  currentStreak,
-  connectionStatus,
   currentUser,
+  connectionStatus,
+  streak,
   onOpenSettings,
-  onOpenCelebration,
   onOpenAuth,
-  notificationPermission,
+  onOpenConnect,
 }) => {
-  const isOnline = connectionStatus === 'connected';
-
-  const handleNotificationClick = async () => {
-    if (notificationPermission !== 'granted') {
-      const result = await requestNotificationPermission();
-      if (result === 'granted') {
-        showToast('পুশ নোটিফিকেশন সক্রিয়! 🔔', 'পার্টনারের রিয়েল-টাইম আপডেট এখানে দেখতে পাবেন।', 'success');
-      }
-    } else {
-      showToast('নোটিফিকেশন সক্রিয় আছে', 'পার্টনার যেকোনো লক্ষ্য সম্পন্ন করলে আপনাকে সতর্ক করা হবে।', 'info');
-    }
-  };
-
-  const isDemo = !currentUser || currentUser.uid.startsWith('demo_');
+  const isDemo = currentUser.uid.startsWith('demo_');
+  const isConnected = !!currentUser.partnerUid;
 
   return (
-    <header className="px-4 py-3 flex items-center justify-between border-b border-white/5 bg-[#101524]/80 backdrop-blur-md sticky top-0 z-30">
-      <div className="flex flex-col">
-        <div className="flex items-center gap-2">
-          <span
-            className={`live-dot ${!isOnline ? 'offline' : ''}`}
-            title={
-              connectionStatus === 'connected'
-                ? 'ফায়ারবেস ক্লাউড লাইভ সিঙ্ক সক্রিয়'
-                : connectionStatus === 'connecting'
-                ? 'ফায়ারবেসের সাথে সংযুক্ত হচ্ছে...'
-                : 'লোকাল সিঙ্ক মোডে আছে'
-            }
-          />
-          <h1 className="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-1.5">
-            একসাথে
-            <span className="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/20">
-              Duo Pod
-            </span>
-          </h1>
+    <header className="border-b border-white/10 bg-[#0d1220]/80 backdrop-blur-md sticky top-0 z-40">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-4">
+        {/* Left: Brand & Date */}
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-rose-500 via-amber-500 to-indigo-500 p-0.5 shadow-lg shadow-rose-500/20 flex items-center justify-center">
+            <div className="w-full h-full bg-[#0d1220] rounded-[14px] flex items-center justify-center text-lg">
+              🎯
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base sm:text-lg font-black text-white tracking-wide">
+                একসাথে <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">Duo Pod</span>
+              </h1>
+            </div>
+            <p className="text-[11px] text-slate-400 font-medium">
+              {formatBengaliDate()}
+            </p>
+          </div>
         </div>
-        <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-          {formatBengaliDate(new Date())}
-        </p>
-      </div>
 
-      <div className="flex items-center gap-1.5 sm:gap-2">
-        {/* User Account / Login Button */}
-        <button
-          onClick={onOpenAuth}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-            isDemo
-              ? 'bg-rose-500/10 border-rose-500/25 text-rose-300 hover:bg-rose-500/20'
-              : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20'
-          }`}
-          title={isDemo ? 'অ্যাকাউন্টে লগইন বা সাইন আপ করুন' : `লগইন আছেন: ${currentUser?.email}`}
-        >
-          {isDemo ? <LogIn className="w-3.5 h-3.5 text-rose-400" /> : <User className="w-3.5 h-3.5 text-emerald-400" />}
-          <span className="max-w-[70px] sm:max-w-[100px] truncate">
-            {isDemo ? 'লগইন' : currentUser?.name || 'অ্যাকাউন্ট'}
-          </span>
-        </button>
+        {/* Right: Actions */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Live Sync Badge */}
+          <div
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+              connectionStatus === 'connected'
+                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                : connectionStatus === 'connecting'
+                ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                : 'bg-indigo-500/15 border-indigo-500/30 text-indigo-300'
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                connectionStatus === 'connected'
+                  ? 'bg-emerald-400 animate-pulse'
+                  : connectionStatus === 'connecting'
+                  ? 'bg-amber-400 animate-spin'
+                  : 'bg-indigo-400'
+              }`}
+            />
+            <span>
+              {connectionStatus === 'connected'
+                ? 'ক্লাউড সিঙ্ক চালু'
+                : connectionStatus === 'connecting'
+                ? 'কানেক্ট হচ্ছে...'
+                : 'লোকাল ডেমো মোড'}
+            </span>
+          </div>
 
-        {/* Notification Bell */}
-        <button
-          onClick={handleNotificationClick}
-          className={`p-2 rounded-xl border transition-all ${
-            notificationPermission === 'granted'
-              ? 'bg-amber-500/10 border-amber-500/25 text-amber-300 hover:bg-amber-500/20'
-              : 'bg-white/5 border-white/10 text-slate-400 hover:text-white hover:bg-white/10'
-          }`}
-          title={
-            notificationPermission === 'granted'
-              ? 'নোটিফিকেশন চালু আছে'
-              : 'পুশ নোটিফিকেশন চালু করতে ক্লিক করুন'
-          }
-          aria-label="পুশ নোটিফিকেশন"
-        >
-          <Bell className="w-4 h-4" />
-        </button>
+          {/* User Profile / Login button */}
+          {isDemo ? (
+            <button
+              onClick={onOpenAuth}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-bold text-xs shadow-md active:scale-95 transition-all cursor-pointer"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>গুগল লগইন</span>
+            </button>
+          ) : (
+            <div
+              onClick={onOpenSettings}
+              className="flex items-center gap-2 p-1 sm:px-2.5 sm:py-1 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-white transition-colors cursor-pointer"
+              title={currentUser.email}
+            >
+              {currentUser.photoURL ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.name}
+                  className="w-7 h-7 rounded-full object-cover border border-white/20"
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-rose-500 to-amber-500 flex items-center justify-center text-white text-xs font-bold">
+                  {currentUser.name.charAt(0)}
+                </div>
+              )}
+              <span className="hidden sm:inline-block text-xs font-semibold max-w-[100px] truncate">
+                {currentUser.name}
+              </span>
+            </div>
+          )}
 
-        {/* Streak Badge Button */}
-        <button
-          onClick={onOpenCelebration}
-          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/15 to-orange-500/20 border border-amber-500/30 text-amber-300 hover:border-amber-400/50 transition-all cursor-pointer group shadow-sm"
-          title="ধারার বিবরণ দেখতে ক্লিক করুন"
-          id="streak-badge-btn"
-        >
-          <span className="flame-anim text-sm sm:text-base group-hover:scale-110 transition-transform">🔥</span>
-          <span className="text-xs sm:text-sm font-semibold tracking-wide font-num">
-            {toBengaliNumber(currentStreak)} দিন
-          </span>
-        </button>
+          {/* Connect Partner button */}
+          <button
+            onClick={onOpenConnect}
+            className={`p-2 rounded-xl transition-colors cursor-pointer ${
+              isConnected
+                ? 'bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30'
+                : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 animate-pulse'
+            }`}
+            title="পার্টনার কানেকশন"
+          >
+            <Users className="w-4 h-4" />
+          </button>
 
-        {/* Settings Icon Button */}
-        <button
-          onClick={onOpenSettings}
-          className="p-2 rounded-xl bg-white/5 border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
-          title="সেটিংস ও পড কনফিগারেশন"
-          id="open-settings-btn"
-          aria-label="সেটিংস"
-        >
-          <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
-        </button>
+          {/* Settings button */}
+          <button
+            onClick={onOpenSettings}
+            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            title="সেটিংস"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     </header>
   );

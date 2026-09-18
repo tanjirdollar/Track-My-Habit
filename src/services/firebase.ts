@@ -5,7 +5,6 @@ import {
   setDoc,
   getDoc,
   onSnapshot,
-  getDocFromServer,
   collection,
   query,
   where,
@@ -15,15 +14,16 @@ import {
 } from 'firebase/firestore';
 import {
   getAuth,
+  signInWithPopup,
+  GoogleAuthProvider,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  updateProfile,
   type Auth,
   type User as FirebaseUser,
 } from 'firebase/auth';
-import type { FirebaseConfig, PodData, Habit, ConnectionStatus, AuthUserProfile, PodUser } from '../types';
+import type { FirebaseConfig, Habit, ConnectionStatus, UserProfile, UserTrackerData } from '../types';
 import { sound, showToast } from './notifications';
 import { getTodayKey } from '../utils/bengali';
 
@@ -38,13 +38,12 @@ export const DEFAULT_FIREBASE_CONFIG: FirebaseConfig = {
 };
 
 const CONFIG_STORAGE_KEY = 'duo_pod_firebase_config';
-const LOCAL_POD_STORAGE_KEY = 'duo_pod_data';
-const USER_PROFILE_KEY = 'duo_pod_auth_user_profile';
+const LOCAL_MY_TRACKER_KEY = 'duo_my_tracker_data';
+const LOCAL_USER_PROFILE_KEY = 'duo_user_profile_data';
 
 let firebaseApp: FirebaseApp | null = null;
 let firestoreDb: Firestore | null = null;
 let firebaseAuth: Auth | null = null;
-let firestoreUnsub: Unsubscribe | null = null;
 let broadcastChannel: BroadcastChannel | null = null;
 
 // Initialize Firebase Core
@@ -76,311 +75,317 @@ export function getFirebaseAuthInstance(): Auth {
   return firebaseAuth;
 }
 
-// Initial Default Habits
+// Config persistence
+export function getSavedFirebaseConfig(): FirebaseConfig | null {
+  if (typeof window === 'undefined') return null;
+  const stored = localStorage.getItem(CONFIG_STORAGE_KEY);
+  if (!stored) return null;
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return null;
+  }
+}
+
+export function saveFirebaseConfig(config: FirebaseConfig) {
+  localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+  firebaseApp = null;
+  firestoreDb = null;
+  firebaseAuth = null;
+}
+
+// Default habits template for any new user
 export function getDefaultHabits(): Habit[] {
   const now = Date.now();
   return [
     {
-      id: 'habit-steps',
-      name: 'হাঁটা',
-      type: 'number',
-      target: 10000,
-      unit: 'কদম',
-      frequency: 'daily',
-      emoji: '👟',
-      myProgress: 6500,
-      partnerProgress: 8200,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: 'habit-sleep',
-      name: 'পর্যাপ্ত ঘুম',
+      id: 'h_water',
+      name: 'পর্যাপ্ত পানি পান',
       type: 'number',
       target: 8,
-      unit: 'ঘণ্টা',
-      frequency: 'daily',
-      emoji: '🌙',
-      myProgress: 7.5,
-      partnerProgress: 8,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: 'habit-water',
-      name: 'পানি পান',
-      type: 'number',
-      target: 8,
+      current: 4,
       unit: 'গ্লাস',
       frequency: 'daily',
       emoji: '💧',
-      myProgress: 5,
-      partnerProgress: 6,
+      completed: false,
       createdAt: now,
       updatedAt: now,
     },
     {
-      id: 'habit-workout',
-      name: 'ব্যায়াম',
+      id: 'h_walk',
+      name: 'মর্নিং ওয়াক বা শরীরচর্চা',
       type: 'number',
-      target: 45,
+      target: 30,
+      current: 30,
       unit: 'মিনিট',
       frequency: 'daily',
-      emoji: '⚡',
-      myProgress: 30,
-      partnerProgress: 45,
+      emoji: '🏃‍♂️',
+      completed: true,
       createdAt: now,
       updatedAt: now,
     },
     {
-      id: 'habit-reading',
-      name: 'বই পড়া',
+      id: 'h_read',
+      name: 'বই বা আর্টিকেল পাঠ',
       type: 'number',
-      target: 20,
+      target: 15,
+      current: 10,
       unit: 'পৃষ্ঠা',
       frequency: 'daily',
-      emoji: '📖',
-      myProgress: 15,
-      partnerProgress: 20,
+      emoji: '📚',
+      completed: false,
       createdAt: now,
       updatedAt: now,
     },
     {
-      id: 'habit-vitamins',
-      name: 'ভিটামিন ও ওষুধ',
+      id: 'h_meditate',
+      name: 'ধ্যান ও মাইন্ডফুলনেস',
       type: 'boolean',
       target: 1,
+      current: 1,
       unit: 'বার',
       frequency: 'daily',
-      emoji: '💊',
-      myProgress: 1,
-      partnerProgress: 1,
-      completedByMe: true,
-      completedByPartner: true,
+      emoji: '🧘‍♂️',
+      completed: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'h_sleep',
+      name: 'রাত ১১টার মধ্যে ঘুম',
+      type: 'boolean',
+      target: 1,
+      current: 0,
+      unit: 'বার',
+      frequency: 'daily',
+      emoji: '😴',
+      completed: false,
       createdAt: now,
       updatedAt: now,
     },
   ];
 }
 
-export function createInitialPod(
-  podId: string,
-  userAInfo?: { id: string; name: string; email?: string }
-): PodData {
-  const now = Date.now();
-  const today = getTodayKey();
+// Generate a memorable 6-character invite code
+export function generateInviteCode(): string {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let code = 'POD-';
+  for (let i = 0; i < 4; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+// Calculate tracker statistics
+export function calculateTrackerStats(habits: Habit[]) {
+  if (!habits || habits.length === 0) {
+    return { completionRate: 0, completedCount: 0, totalCount: 0, healthScore: 0 };
+  }
+
+  const totalCount = habits.length;
+  let completedCount = 0;
+  let totalPercentSum = 0;
+
+  for (const h of habits) {
+    const isDone = h.completed || (h.target > 0 && h.current >= h.target);
+    if (isDone) completedCount++;
+
+    const percent = h.target > 0 ? Math.min(100, Math.round((h.current / h.target) * 100)) : (h.completed ? 100 : 0);
+    totalPercentSum += percent;
+  }
+
+  const completionRate = Math.round((completedCount / totalCount) * 100);
+  const healthScore = Math.round(totalPercentSum / totalCount);
+
+  return { completionRate, completedCount, totalCount, healthScore };
+}
+
+// Initial tracker object
+export function createInitialTracker(userId: string, userName: string, userEmail: string): UserTrackerData {
+  const habits = getDefaultHabits();
+  const stats = calculateTrackerStats(habits);
+
   return {
-    podId,
-    createdAt: now,
-    userA: {
-      id: userAInfo?.id || 'usr_' + Math.random().toString(36).substring(2, 8),
-      name: userAInfo?.name || 'আমি',
-      email: userAInfo?.email || '',
-      role: 'userA',
-      lastActive: now,
-    },
-    userB: null,
-    habits: getDefaultHabits(),
-    currentStreak: 12,
-    bestStreak: 24,
-    daysTogether: 42,
-    healthScore: 86,
-    history: {
-      [today]: { userADone: false, userBDone: false },
-    },
-    lastSyncTime: now,
+    userId,
+    userName,
+    userEmail,
+    partnerUid: null,
+    habits,
+    currentStreak: 7,
+    bestStreak: 14,
+    healthScore: stats.healthScore,
+    todayCompletionRate: stats.completionRate,
+    todayCompletedCount: stats.completedCount,
+    todayTotalCount: stats.totalCount,
     lastAction: {
-      userId: 'system',
-      userName: 'একসাথে সিস্টেম',
-      actionText: 'পড সক্রিয় হয়েছে',
-      timestamp: now,
+      actionText: 'নতুন ট্র্যাকার শুরু করেছেন',
+      timestamp: Date.now(),
     },
+    history: {
+      [getTodayKey()]: {
+        completedCount: stats.completedCount,
+        totalCount: stats.totalCount,
+        rate: stats.completionRate,
+      },
+    },
+    lastUpdated: Date.now(),
   };
 }
 
-// Config helpers
-export function getSavedFirebaseConfig(): FirebaseConfig | null {
-  if (typeof window === 'undefined') return DEFAULT_FIREBASE_CONFIG;
-  const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
-  if (!raw) return DEFAULT_FIREBASE_CONFIG;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return DEFAULT_FIREBASE_CONFIG;
-  }
-}
+// ----------------------------------------------------
+// AUTHENTICATION FUNCTIONS
+// ----------------------------------------------------
 
-export function saveFirebaseConfig(config: FirebaseConfig | null) {
-  if (!config) {
-    localStorage.removeItem(CONFIG_STORAGE_KEY);
-  } else {
-    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
-  }
-  // Reset cached instances to use new config
-  firebaseApp = null;
-  firestoreDb = null;
-  firebaseAuth = null;
-}
-
-// ==================== AUTHENTICATION SERVICES ====================
-
-// Get saved user profile from localStorage
-export function getSavedUserProfile(): AuthUserProfile | null {
+export function getSavedUserProfile(): UserProfile | null {
   if (typeof window === 'undefined') return null;
-  const raw = localStorage.getItem(USER_PROFILE_KEY);
-  if (!raw) return null;
+  const stored = localStorage.getItem(LOCAL_USER_PROFILE_KEY);
+  if (!stored) return null;
   try {
-    return JSON.parse(raw);
+    return JSON.parse(stored);
   } catch {
     return null;
   }
 }
 
-// Get current active user profile or default demo profile
-export function getCurrentUserProfile(): AuthUserProfile {
+export function saveUserProfileLocal(profile: UserProfile | null) {
+  if (!profile) {
+    localStorage.removeItem(LOCAL_USER_PROFILE_KEY);
+  } else {
+    localStorage.setItem(LOCAL_USER_PROFILE_KEY, JSON.stringify(profile));
+  }
+}
+
+// Default Demo User for instant local viewing
+export function getDemoUserProfile(): UserProfile {
   const saved = getSavedUserProfile();
   if (saved) return saved;
 
-  let initialPodId = 'POD-DUO88';
-  let initialRole: 'userA' | 'userB' = 'userA';
-  if (typeof window !== 'undefined') {
-    const params = new URLSearchParams(window.location.search);
-    const p = params.get('pod');
-    if (p) initialPodId = p;
-    const r = params.get('role');
-    if (r === 'userB' || r === 'userA') initialRole = r;
-  }
-
-  const demoUser: AuthUserProfile = {
-    uid: 'demo_userA_' + Math.random().toString(36).substring(2, 7),
-    name: initialRole === 'userA' ? 'আমি' : 'পার্টনার',
-    email: '',
-    role: initialRole,
-    podId: initialPodId,
+  const demoUser: UserProfile = {
+    uid: 'demo_user_me',
+    name: 'আমি (Demo)',
+    email: 'demo.user@mail.com',
+    inviteCode: 'POD-7788',
+    partnerUid: 'demo_user_partner',
+    partnerName: 'পার্টনার (Demo)',
+    partnerEmail: 'partner.demo@mail.com',
+    updatedAt: Date.now(),
   };
-  saveUserProfile(demoUser);
+  saveUserProfileLocal(demoUser);
   return demoUser;
 }
 
-export function saveUserProfile(profile: AuthUserProfile | null) {
-  if (!profile) {
-    localStorage.removeItem(USER_PROFILE_KEY);
-  } else {
-    localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
-  }
-}
-
-// Subscribe to Firebase Auth state
-export function subscribeToAuth(
-  onUserChanged: (user: AuthUserProfile | null) => void
-): () => void {
-  try {
-    const auth = getFirebaseAuthInstance();
-    return onAuthStateChanged(auth, async (fbUser: FirebaseUser | null) => {
-      if (fbUser) {
-        // Fetch or create profile in Firestore
-        const profile = await syncUserProfileFromFirestore(fbUser);
-        saveUserProfile(profile);
-        onUserChanged(profile);
-      } else {
-        const local = getSavedUserProfile();
-        // If not a demo user, clear profile
-        if (local && !local.uid.startsWith('demo_')) {
-          saveUserProfile(null);
-          onUserChanged(null);
-        } else {
-          onUserChanged(local);
-        }
-      }
-    });
-  } catch (err) {
-    console.warn('Auth listener init error:', err);
-    onUserChanged(getSavedUserProfile());
-    return () => {};
-  }
-}
-
-// Fetch or create user record in Firestore `users/{uid}`
-async function syncUserProfileFromFirestore(
-  fbUser: FirebaseUser,
-  customName?: string
-): Promise<AuthUserProfile> {
+// Sync or fetch profile from Firestore upon login
+export async function syncUserProfileOnLogin(user: FirebaseUser): Promise<UserProfile> {
   const db = getFirestoreDb();
-  const userDocRef = doc(db, 'users', fbUser.uid);
-
-  // Check URL params for quick partner code/invite: ?pod=D-74921
-  let invitePodId: string | null = null;
-  if (typeof window !== 'undefined') {
-    const params = new URLSearchParams(window.location.search);
-    invitePodId = params.get('pod');
-  }
+  const userRef = doc(db, 'users', user.uid);
 
   try {
-    const snapshot = await getDoc(userDocRef);
-    if (snapshot.exists()) {
-      const data = snapshot.data() as AuthUserProfile;
-      return {
-        uid: fbUser.uid,
-        email: fbUser.email || data.email || '',
-        name: fbUser.displayName || data.name || customName || 'ইউজার',
-        role: data.role || 'userA',
-        podId: data.podId || (invitePodId ? invitePodId : `POD-${fbUser.uid.substring(0, 5).toUpperCase()}`),
-        partnerUid: data.partnerUid,
-        partnerEmail: data.partnerEmail,
+    const snap = await getDoc(userRef);
+    if (snap.exists()) {
+      const data = snap.data() as UserProfile;
+      const updated: UserProfile = {
+        ...data,
+        name: user.displayName || data.name || 'ইউজার',
+        email: user.email || data.email || '',
+        photoURL: user.photoURL || data.photoURL || '',
+        updatedAt: Date.now(),
       };
+      await setDoc(userRef, updated, { merge: true });
+      saveUserProfileLocal(updated);
+      return updated;
+    } else {
+      // New user
+      const inviteCode = generateInviteCode();
+      const newProfile: UserProfile = {
+        uid: user.uid,
+        name: user.displayName || 'ইউজার',
+        email: user.email || '',
+        photoURL: user.photoURL || '',
+        inviteCode,
+        partnerUid: null,
+        partnerName: null,
+        partnerEmail: null,
+        partnerPhoto: null,
+        updatedAt: Date.now(),
+      };
+
+      await setDoc(userRef, newProfile);
+      saveUserProfileLocal(newProfile);
+
+      // Create initial tracker document for this user
+      const trackerRef = doc(db, 'user_trackers', user.uid);
+      const trackerSnap = await getDoc(trackerRef);
+      if (!trackerSnap.exists()) {
+        const initialTracker = createInitialTracker(user.uid, newProfile.name, newProfile.email);
+        await setDoc(trackerRef, initialTracker);
+      }
+
+      return newProfile;
     }
   } catch (err) {
-    console.warn('Error fetching user document from Firestore:', err);
+    console.error('Error syncing user profile in Firestore:', err);
+    // Return fallback profile if offline/permission issue
+    const fallback: UserProfile = {
+      uid: user.uid,
+      name: user.displayName || 'ইউজার',
+      email: user.email || '',
+      photoURL: user.photoURL || '',
+      inviteCode: 'POD-' + user.uid.substring(0, 4).toUpperCase(),
+      partnerUid: null,
+      updatedAt: Date.now(),
+    };
+    saveUserProfileLocal(fallback);
+    return fallback;
   }
+}
 
-  // Create new user record
-  const defaultPodId = invitePodId ? invitePodId : `POD-${fbUser.uid.substring(0, 5).toUpperCase()}`;
-  const newProfile: AuthUserProfile = {
-    uid: fbUser.uid,
-    email: fbUser.email || '',
-    name: fbUser.displayName || customName || (fbUser.email ? fbUser.email.split('@')[0] : 'ইউজার'),
-    role: invitePodId ? 'userB' : 'userA',
-    podId: defaultPodId,
-  };
+// Google Sign-In with Popup
+export async function loginWithGoogle(): Promise<UserProfile> {
+  const auth = getFirebaseAuthInstance();
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
 
   try {
-    await setDoc(userDocRef, newProfile, { merge: true });
-  } catch (err) {
-    console.warn('Could not save user profile to Firestore:', err);
-  }
-
-  return newProfile;
-}
-
-// Register with Email & Password
-export async function registerWithEmail(
-  name: string,
-  email: string,
-  pass: string
-): Promise<AuthUserProfile> {
-  const auth = getFirebaseAuthInstance();
-  const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), pass);
-  if (name.trim()) {
-    try {
-      await updateProfile(userCredential.user, { displayName: name.trim() });
-    } catch {
-      // ignore
+    const cred = await signInWithPopup(auth, provider);
+    const profile = await syncUserProfileOnLogin(cred.user);
+    sound.playCompletion();
+    showToast('গুগল লগইন সফল হয়েছে! 🎉', `${profile.name}, স্বাগতম!`, 'success');
+    return profile;
+  } catch (err: any) {
+    console.error('Google Sign-In Error:', err);
+    let msg = 'গুগল লগইন সম্পন্ন করা যায়নি।';
+    if (err?.code === 'auth/popup-closed-by-user') {
+      msg = 'লগইন উইন্ডো বন্ধ করা হয়েছে।';
+    } else if (err?.code === 'auth/unauthorized-domain') {
+      msg = 'এই ডোমেনটি Firebase Console-এ Authorized Domains-এ যুক্ত করা নেই। অনুগ্রহ করে Firebase Console থেকে ডোমেনটি যুক্ত করুন।';
+    } else if (err?.code === 'auth/operation-not-allowed') {
+      msg = 'Firebase Console-এ Google Sign-In সক্রিয় করা নেই। Authentication > Sign-in method থেকে Google চালু করুন।';
+    } else if (err?.message) {
+      msg = err.message;
     }
+    throw new Error(msg);
   }
-  const profile = await syncUserProfileFromFirestore(userCredential.user, name.trim());
-  saveUserProfile(profile);
-  return profile;
 }
 
-// Login with Email & Password
-export async function loginWithEmail(
-  email: string,
-  pass: string
-): Promise<AuthUserProfile> {
+// Email/Password login fallback
+export async function loginWithEmail(email: string, pass: string): Promise<UserProfile> {
   const auth = getFirebaseAuthInstance();
-  const userCredential = await signInWithEmailAndPassword(auth, email.trim(), pass);
-  const profile = await syncUserProfileFromFirestore(userCredential.user);
-  saveUserProfile(profile);
+  const cred = await signInWithEmailAndPassword(auth, email, pass);
+  return await syncUserProfileOnLogin(cred.user);
+}
+
+// Email/Password registration
+export async function registerWithEmail(name: string, email: string, pass: string): Promise<UserProfile> {
+  const auth = getFirebaseAuthInstance();
+  const cred = await createUserWithEmailAndPassword(auth, email, pass);
+  const profile = await syncUserProfileOnLogin(cred.user);
+  // Update name if available
+  if (name.trim()) {
+    profile.name = name.trim();
+    saveUserProfileLocal(profile);
+    const db = getFirestoreDb();
+    await setDoc(doc(db, 'users', profile.uid), { name: name.trim() }, { merge: true });
+  }
   return profile;
 }
 
@@ -390,369 +395,447 @@ export async function logoutUser(): Promise<void> {
     const auth = getFirebaseAuthInstance();
     await signOut(auth);
   } catch (err) {
-    console.warn('Firebase sign out error:', err);
+    console.warn('Sign out error:', err);
   }
-  saveUserProfile(null);
+  saveUserProfileLocal(null);
+  localStorage.removeItem(LOCAL_MY_TRACKER_KEY);
 }
 
-// Quick Demo Login (for instant testing or offline demo)
-export function loginAsDemo(role: 'userA' | 'userB', customName?: string): AuthUserProfile {
-  const profile: AuthUserProfile = {
-    uid: role === 'userA' ? 'demo_user_a_101' : 'demo_user_b_202',
-    email: role === 'userA' ? 'user_a@duopod.app' : 'partner_b@duopod.app',
-    name: customName || (role === 'userA' ? 'আমি (User A)' : 'পার্টনার (User B)'),
-    role,
-    podId: 'POD-74921',
-  };
-  saveUserProfile(profile);
-  return profile;
-}
-
-// ==================== POD SYNCHRONIZATION ====================
-
-export function initPodSync(
-  podId: string,
-  currentUser: AuthUserProfile,
-  onPodUpdate: (data: PodData) => void,
-  onStatusChange: (status: ConnectionStatus) => void
-): () => void {
-  // 1. BroadcastChannel for instant local cross-tab sync
-  if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-    try {
-      broadcastChannel = new BroadcastChannel(`duo_pod_${podId}`);
-      broadcastChannel.onmessage = (event) => {
-        if (event.data && event.data.podId === podId) {
-          onPodUpdate(event.data);
-          handleRemoteActionNotice(event.data, currentUser.uid);
-        }
-      };
-    } catch (e) {
-      console.warn('BroadcastChannel not available', e);
-    }
-  }
-
-  // 2. Storage event fallback
-  const onStorageEvent = (e: StorageEvent) => {
-    if (e.key === `${LOCAL_POD_STORAGE_KEY}_${podId}` && e.newValue) {
+// Subscribe to auth changes
+export function subscribeToAuth(callback: (user: UserProfile | null) => void): Unsubscribe {
+  const auth = getFirebaseAuthInstance();
+  return onAuthStateChanged(auth, async (firebaseUser) => {
+    if (firebaseUser) {
       try {
-        const parsed = JSON.parse(e.newValue);
-        onPodUpdate(parsed);
-        handleRemoteActionNotice(parsed, currentUser.uid);
+        const profile = await syncUserProfileOnLogin(firebaseUser);
+        callback(profile);
       } catch {
-        // ignore
+        const fallback = getSavedUserProfile();
+        callback(fallback);
       }
+    } else {
+      callback(null);
     }
-  };
-  window.addEventListener('storage', onStorageEvent);
+  });
+}
 
-  // 3. Load local cache first for instant UI response
-  const localRaw = localStorage.getItem(`${LOCAL_POD_STORAGE_KEY}_${podId}`);
-  let currentPod: PodData;
-  if (localRaw) {
-    try {
-      currentPod = JSON.parse(localRaw);
-    } catch {
-      currentPod = createInitialPod(podId, {
-        id: currentUser.uid,
-        name: currentUser.name,
-        email: currentUser.email,
-      });
+// ----------------------------------------------------
+// REAL-TIME TRACKER SYNC (MY SPACE & PARTNER SPACE)
+// ----------------------------------------------------
+
+function getBroadcastChannel(): BroadcastChannel | null {
+  if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+    if (!broadcastChannel) {
+      broadcastChannel = new BroadcastChannel('duo_pod_channel_v2');
     }
-  } else {
-    currentPod = createInitialPod(podId, {
-      id: currentUser.uid,
-      name: currentUser.name,
-      email: currentUser.email,
-    });
-    localStorage.setItem(`${LOCAL_POD_STORAGE_KEY}_${podId}`, JSON.stringify(currentPod));
+    return broadcastChannel;
   }
-  onPodUpdate(currentPod);
+  return null;
+}
 
-  // 4. Firestore Live Sync
-  onStatusChange('connecting');
-  try {
-    const db = getFirestoreDb();
-    const podDocRef = doc(db, 'pods', podId);
-
-    firestoreUnsub = onSnapshot(
-      podDocRef,
-      (snapshot) => {
-        if (snapshot.exists()) {
-          const cloudData = snapshot.data() as PodData;
-          onPodUpdate(cloudData);
-          localStorage.setItem(`${LOCAL_POD_STORAGE_KEY}_${podId}`, JSON.stringify(cloudData));
-          handleRemoteActionNotice(cloudData, currentUser.uid);
-          onStatusChange('connected');
-        } else {
-          // Document does not exist in Firestore yet: upload initial pod
-          setDoc(podDocRef, currentPod, { merge: true })
-            .then(() => onStatusChange('connected'))
-            .catch((err) => {
-              console.warn('Could not initialize Firestore pod document:', err);
-              onStatusChange('demo');
-            });
-        }
-      },
-      (error) => {
-        console.warn('Firestore onSnapshot error:', error.message);
-        onStatusChange('demo');
+// Subscribe to MY OWN tracker (Owner: Read & Write)
+export function subscribeToMyTracker(
+  userId: string,
+  userProfile: UserProfile,
+  onData: (data: UserTrackerData) => void,
+  onStatusChange?: (status: ConnectionStatus) => void
+): Unsubscribe {
+  // If demo mode
+  if (userId.startsWith('demo_')) {
+    onStatusChange?.('demo');
+    const stored = localStorage.getItem(LOCAL_MY_TRACKER_KEY);
+    let tracker: UserTrackerData;
+    if (stored) {
+      try {
+        tracker = JSON.parse(stored);
+      } catch {
+        tracker = createInitialTracker(userId, userProfile.name, userProfile.email);
       }
-    );
-  } catch (err) {
-    console.warn('Firebase init error:', err);
-    onStatusChange('demo');
-  }
-
-  return () => {
-    if (firestoreUnsub) {
-      firestoreUnsub();
-      firestoreUnsub = null;
+    } else {
+      tracker = createInitialTracker(userId, userProfile.name, userProfile.email);
+      localStorage.setItem(LOCAL_MY_TRACKER_KEY, JSON.stringify(tracker));
     }
-    if (broadcastChannel) {
-      broadcastChannel.close();
-      broadcastChannel = null;
-    }
-    window.removeEventListener('storage', onStorageEvent);
-  };
-}
+    onData(tracker);
 
-let lastNotifiedActionTime = Date.now();
+    const channel = getBroadcastChannel();
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'UPDATE_MY_TRACKER' && e.data.userId === userId) {
+        onData(e.data.tracker);
+      }
+    };
+    channel?.addEventListener('message', handleMessage);
 
-function handleRemoteActionNotice(podData: PodData, myUserId: string) {
-  if (!podData.lastAction) return;
-
-  // If action was executed by the other user and is fresh
-  if (
-    podData.lastAction.userId !== myUserId &&
-    podData.lastAction.timestamp > lastNotifiedActionTime
-  ) {
-    lastNotifiedActionTime = podData.lastAction.timestamp;
-    sound.playPartnerUpdate();
-    showToast(
-      `পার্টনারের আপডেট: ${podData.lastAction.userName}`,
-      podData.lastAction.actionText,
-      'info'
-    );
-  }
-}
-
-// Push updated PodData to Firestore and Local Storage
-export async function syncPodData(data: PodData): Promise<void> {
-  const updated: PodData = {
-    ...data,
-    lastSyncTime: Date.now(),
-  };
-
-  // 1. Local Storage
-  localStorage.setItem(`${LOCAL_POD_STORAGE_KEY}_${data.podId}`, JSON.stringify(updated));
-
-  // 2. BroadcastChannel
-  if (broadcastChannel) {
-    try {
-      broadcastChannel.postMessage(updated);
-    } catch (e) {
-      console.warn('BroadcastChannel error:', e);
-    }
+    return () => {
+      channel?.removeEventListener('message', handleMessage);
+    };
   }
 
-  // 3. Firestore
-  try {
-    const db = getFirestoreDb();
-    const podDocRef = doc(db, 'pods', data.podId);
-    await setDoc(podDocRef, updated, { merge: true });
-  } catch (err) {
-    console.warn('Firestore sync failed:', err);
-  }
-}
-
-// Connect / Pair with a partner via Pod Code or Partner Email
-export async function pairPartnerByCodeOrEmail(
-  pod: PodData,
-  partnerCodeOrEmail: string,
-  myProfile: AuthUserProfile
-): Promise<{ success: boolean; message: string; updatedPod?: PodData }> {
-  const queryText = partnerCodeOrEmail.trim();
-  if (!queryText) {
-    return { success: false, message: 'অনুগ্রহ করে পার্টনারের পড কোড বা ইমেইল লিখুন।' };
-  }
-
-  const now = Date.now();
+  // Real Cloud Firestore sync
+  onStatusChange?.('connecting');
   const db = getFirestoreDb();
+  const trackerRef = doc(db, 'user_trackers', userId);
 
-  // If query is an email, search in 'users' collection
-  if (queryText.includes('@')) {
-    try {
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', queryText.toLowerCase()));
-      const querySnapshot = await getDocs(q);
+  let initialLoad = true;
 
-      if (!querySnapshot.empty) {
-        const partnerDoc = querySnapshot.docs[0];
-        const partnerData = partnerDoc.data() as AuthUserProfile;
-
-        if (partnerData.uid === myProfile.uid) {
-          return { success: false, message: 'নিজের ইমেইল দিয়ে পার্টনার হিসেবে যুক্ত হওয়া যাবে না।' };
-        }
-
-        const partnerUser: PodUser = {
-          id: partnerData.uid,
-          name: partnerData.name || partnerData.email.split('@')[0],
-          email: partnerData.email,
-          role: 'userB',
-          lastActive: now,
-        };
-
-        const updatedPod: PodData = {
-          ...pod,
-          userB: partnerUser,
-          lastAction: {
-            userId: myProfile.uid,
-            userName: myProfile.name,
-            actionText: `${partnerUser.name}-এর সাথে পড কানেক্ট করা হয়েছে! 🤝`,
-            timestamp: now,
-          },
-        };
-
-        // Update partner's user doc with this podId
-        await setDoc(
-          doc(db, 'users', partnerData.uid),
-          { podId: pod.podId, partnerUid: myProfile.uid, partnerEmail: myProfile.email, role: 'userB' },
-          { merge: true }
-        );
-
-        // Update my user doc
-        await setDoc(
-          doc(db, 'users', myProfile.uid),
-          { partnerUid: partnerData.uid, partnerEmail: partnerData.email, role: 'userA' },
-          { merge: true }
-        );
-
-        await syncPodData(updatedPod);
-        sound.playCompletion();
-        showToast('পার্টনার সফলভাবে সংযুক্ত হয়েছেন! 🎉', `${partnerUser.name} আপনার পডে যুক্ত হয়েছেন।`, 'celebrate');
-        return { success: true, message: 'পার্টনার সংযুক্ত হয়েছে!', updatedPod };
+  const unsub = onSnapshot(
+    trackerRef,
+    async (snap) => {
+      onStatusChange?.('connected');
+      if (snap.exists()) {
+        const data = snap.data() as UserTrackerData;
+        localStorage.setItem(LOCAL_MY_TRACKER_KEY, JSON.stringify(data));
+        onData(data);
+      } else {
+        // Document does not exist yet; bootstrap it!
+        const initial = createInitialTracker(userId, userProfile.name, userProfile.email);
+        initial.partnerUid = userProfile.partnerUid || null;
+        await setDoc(trackerRef, initial);
+        localStorage.setItem(LOCAL_MY_TRACKER_KEY, JSON.stringify(initial));
+        onData(initial);
       }
-    } catch (err) {
-      console.warn('Error finding user by email in Firestore:', err);
-    }
-  }
-
-  // Treat as Pod Code (e.g. POD-12345 or D-74921)
-  const targetPodId = queryText.toUpperCase();
-
-  // If joining another existing pod
-  if (targetPodId !== pod.podId) {
-    try {
-      const targetDoc = await getDoc(doc(db, 'pods', targetPodId));
-      if (targetDoc.exists()) {
-        const targetData = targetDoc.data() as PodData;
-        const updatedTargetPod: PodData = {
-          ...targetData,
-          userB: {
-            id: myProfile.uid,
-            name: myProfile.name,
-            email: myProfile.email,
-            role: 'userB',
-            lastActive: now,
-          },
-          lastAction: {
-            userId: myProfile.uid,
-            userName: myProfile.name,
-            actionText: 'পডে নতুন পার্টনার যুক্ত হয়েছেন! 🤝',
-            timestamp: now,
-          },
-        };
-
-        await setDoc(doc(db, 'pods', targetPodId), updatedTargetPod, { merge: true });
-
-        // Update my user profile
-        await setDoc(
-          doc(db, 'users', myProfile.uid),
-          { podId: targetPodId, role: 'userB' },
-          { merge: true }
-        );
-
-        // Update local storage profile
-        saveUserProfile({
-          ...myProfile,
-          podId: targetPodId,
-          role: 'userB',
-        });
-
-        sound.playCompletion();
-        showToast('পডে সফলভাবে যুক্ত হয়েছেন! 🎉', `পড কোড: ${targetPodId}`, 'celebrate');
-        return { success: true, message: 'পডে যুক্ত হয়েছেন!', updatedPod: updatedTargetPod };
-      }
-    } catch (err) {
-      console.warn('Error joining pod by code:', err);
-    }
-  }
-
-  // Otherwise, attach partner directly to current pod
-  const partnerUser: PodUser = {
-    id: 'usr_partner_' + Math.random().toString(36).substring(2, 7),
-    name: `পার্টনার (${queryText})`,
-    role: 'userB',
-    lastActive: now,
-  };
-
-  const updatedPod: PodData = {
-    ...pod,
-    userB: partnerUser,
-    lastAction: {
-      userId: myProfile.uid,
-      userName: myProfile.name,
-      actionText: `পার্টনার (${queryText}) পডে যুক্ত হয়েছেন! 🤝`,
-      timestamp: now,
+      initialLoad = false;
     },
-  };
+    (err) => {
+      console.warn('Firestore subscription error (My Tracker):', err);
+      onStatusChange?.('error');
+      // Fallback to local storage
+      const stored = localStorage.getItem(LOCAL_MY_TRACKER_KEY);
+      if (stored) {
+        try {
+          onData(JSON.parse(stored));
+        } catch {}
+      }
+    }
+  );
 
-  await syncPodData(updatedPod);
-  sound.playCompletion();
-  showToast('পার্টনার সংযুক্ত করা হয়েছে!', queryText, 'celebrate');
-  return { success: true, message: 'পার্টনার যুক্ত হয়েছে', updatedPod };
+  return unsub;
 }
 
-// Alias for pairPartner returning updated PodData
-export async function pairPartner(
-  pod: PodData,
-  partnerCodeOrEmail: string,
-  myProfile: AuthUserProfile
-): Promise<PodData> {
-  const result = await pairPartnerByCodeOrEmail(pod, partnerCodeOrEmail, myProfile);
-  return result.updatedPod || pod;
-}
-
-// Unpair partner
-export async function unpairPartner(
-  pod: PodData,
-  myProfile: AuthUserProfile
-): Promise<PodData> {
+// Update MY OWN tracker (Owner write)
+export async function updateMyTracker(
+  userId: string,
+  updatedData: UserTrackerData
+): Promise<void> {
+  const stats = calculateTrackerStats(updatedData.habits);
   const now = Date.now();
-  const updatedPod: PodData = {
-    ...pod,
-    userB: null,
-    lastAction: {
-      userId: myProfile.uid,
-      userName: myProfile.name,
-      actionText: 'পার্টনার পড থেকে বিচ্ছিন্ন হয়েছেন।',
-      timestamp: now,
+  const todayKey = getTodayKey();
+
+  const finalData: UserTrackerData = {
+    ...updatedData,
+    healthScore: stats.healthScore,
+    todayCompletionRate: stats.completionRate,
+    todayCompletedCount: stats.completedCount,
+    todayTotalCount: stats.totalCount,
+    lastUpdated: now,
+    history: {
+      ...(updatedData.history || {}),
+      [todayKey]: {
+        completedCount: stats.completedCount,
+        totalCount: stats.totalCount,
+        rate: stats.completionRate,
+      },
     },
   };
 
-  // Clear partner in firestore user profile
+  // Local storage save
+  localStorage.setItem(LOCAL_MY_TRACKER_KEY, JSON.stringify(finalData));
+
+  // Broadcast to other tabs
+  const channel = getBroadcastChannel();
+  channel?.postMessage({
+    type: 'UPDATE_MY_TRACKER',
+    userId,
+    tracker: finalData,
+  });
+
+  // Cloud Firestore save
+  if (!userId.startsWith('demo_')) {
+    try {
+      const db = getFirestoreDb();
+      const trackerRef = doc(db, 'user_trackers', userId);
+      await setDoc(trackerRef, finalData, { merge: true });
+    } catch (err) {
+      console.error('Failed to sync My Tracker to Cloud Firestore:', err);
+    }
+  }
+}
+
+// Subscribe to PARTNER'S tracker (Strict Read-Only)
+export function subscribeToPartnerTracker(
+  partnerUid: string | null | undefined,
+  onData: (data: UserTrackerData | null) => void,
+  onNotification?: (text: string) => void
+): Unsubscribe {
+  if (!partnerUid) {
+    onData(null);
+    return () => {};
+  }
+
+  // If demo partner
+  if (partnerUid.startsWith('demo_')) {
+    const demoPartnerTracker = createInitialTracker(partnerUid, 'পার্টনার (Demo)', 'partner.demo@mail.com');
+    // Set some sample progress for demonstration
+    if (demoPartnerTracker.habits[0]) demoPartnerTracker.habits[0].current = 6;
+    if (demoPartnerTracker.habits[2]) demoPartnerTracker.habits[2].current = 15;
+    if (demoPartnerTracker.habits[2]) demoPartnerTracker.habits[2].completed = true;
+    const stats = calculateTrackerStats(demoPartnerTracker.habits);
+    demoPartnerTracker.todayCompletionRate = stats.completionRate;
+    demoPartnerTracker.todayCompletedCount = stats.completedCount;
+    demoPartnerTracker.healthScore = stats.healthScore;
+    onData(demoPartnerTracker);
+
+    const channel = getBroadcastChannel();
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'UPDATE_MY_TRACKER' && e.data.userId === partnerUid) {
+        onData(e.data.tracker);
+        if (e.data.tracker?.lastAction?.actionText) {
+          onNotification?.(e.data.tracker.lastAction.actionText);
+        }
+      }
+    };
+    channel?.addEventListener('message', handleMessage);
+
+    return () => {
+      channel?.removeEventListener('message', handleMessage);
+    };
+  }
+
+  const db = getFirestoreDb();
+  const partnerRef = doc(db, 'user_trackers', partnerUid);
+
+  let prevActionTime = 0;
+
+  const unsub = onSnapshot(
+    partnerRef,
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as UserTrackerData;
+        onData(data);
+
+        // If partner completed an action, trigger real-time sound/toast alert
+        if (data.lastAction && data.lastAction.timestamp > prevActionTime) {
+          if (prevActionTime > 0) {
+            sound.playBell();
+            showToast(
+              `${data.userName || 'পার্টনার'} লক্ষ্য পূরণ করেছেন! 🌟`,
+              data.lastAction.actionText || 'পার্টনার তার অগ্রগতির তথ্য আপডেট করেছেন।',
+              'celebrate'
+            );
+            onNotification?.(data.lastAction.actionText);
+          }
+          prevActionTime = data.lastAction.timestamp;
+        }
+      } else {
+        onData(null);
+      }
+    },
+    (err) => {
+      console.warn('Partner tracker read-only subscription error:', err);
+      onData(null);
+    }
+  );
+
+  return unsub;
+}
+
+// ----------------------------------------------------
+// PARTNER PAIRING / CONNECTION (INVITE CODE OR EMAIL)
+// ----------------------------------------------------
+
+export interface PairPartnerResult {
+  success: boolean;
+  message: string;
+  partner?: UserProfile;
+}
+
+export async function connectPartnerByCodeOrEmail(
+  currentUser: UserProfile,
+  codeOrEmailInput: string
+): Promise<PairPartnerResult> {
+  const queryTerm = codeOrEmailInput.trim();
+  if (!queryTerm) {
+    return { success: false, message: 'অনুগ্রহ করে পার্টনারের কোড বা ইমেইল লিখুন।' };
+  }
+
+  // Cannot connect to self
+  if (
+    queryTerm.toUpperCase() === currentUser.inviteCode.toUpperCase() ||
+    (currentUser.email && queryTerm.toLowerCase() === currentUser.email.toLowerCase())
+  ) {
+    return {
+      success: false,
+      message: 'আপনি নিজের কোড বা ইমেইল দিয়ে নিজের সাথে যুক্ত হতে পারবেন না। আপনার পার্টনারের কোড লিখুন।',
+    };
+  }
+
+  // In demo mode: simulate instant connection
+  if (currentUser.uid.startsWith('demo_')) {
+    const demoPartner: UserProfile = {
+      uid: 'demo_user_partner',
+      name: queryTerm.includes('@') ? queryTerm.split('@')[0] : 'পার্টনার (Duo)',
+      email: queryTerm.includes('@') ? queryTerm : 'partner@mail.com',
+      inviteCode: queryTerm.toUpperCase(),
+      partnerUid: currentUser.uid,
+      partnerName: currentUser.name,
+      partnerEmail: currentUser.email,
+      updatedAt: Date.now(),
+    };
+
+    currentUser.partnerUid = demoPartner.uid;
+    currentUser.partnerName = demoPartner.name;
+    currentUser.partnerEmail = demoPartner.email;
+    saveUserProfileLocal(currentUser);
+
+    sound.playCompletion();
+    showToast('পার্টনার সফলভাবে যুক্ত হয়েছে! 🤝', `${demoPartner.name}-এর সাথে কানেক্ট সম্পন্ন।`, 'celebrate');
+    return { success: true, message: 'পার্টনার যুক্ত হয়েছে', partner: demoPartner };
+  }
+
   try {
     const db = getFirestoreDb();
+    const usersCol = collection(db, 'users');
+
+    let partnerDocSnap: any = null;
+
+    if (queryTerm.includes('@')) {
+      // Query by email
+      const qEmail = query(usersCol, where('email', '==', queryTerm.toLowerCase()));
+      const snap = await getDocs(qEmail);
+      if (!snap.empty) {
+        partnerDocSnap = snap.docs[0];
+      }
+    } else {
+      // Query by invite code (case-insensitive search by normalized uppercase)
+      const qCode = query(usersCol, where('inviteCode', '==', queryTerm.toUpperCase()));
+      const snap = await getDocs(qCode);
+      if (!snap.empty) {
+        partnerDocSnap = snap.docs[0];
+      }
+    }
+
+    if (!partnerDocSnap) {
+      return {
+        success: false,
+        message: `"${queryTerm}" দিয়ে কোনো অ্যাকাউন্ট পাওয়া যায়নি। পার্টনারকে এই অ্যাপে গুগল দিয়ে লগইন করতে বলুন এবং তার স্ক্রিনে থাকা কোডটি সংগ্রহ করুন।`,
+      };
+    }
+
+    const partnerData = partnerDocSnap.data() as UserProfile;
+
+    if (partnerData.uid === currentUser.uid) {
+      return { success: false, message: 'আপনি নিজের সাথে কানেক্ট করতে পারবেন না।' };
+    }
+
+    // Update current user doc in Firestore
+    const myUserRef = doc(db, 'users', currentUser.uid);
     await setDoc(
-      doc(db, 'users', myProfile.uid),
-      { partnerUid: null, partnerEmail: null },
+      myUserRef,
+      {
+        partnerUid: partnerData.uid,
+        partnerName: partnerData.name,
+        partnerEmail: partnerData.email,
+        partnerPhoto: partnerData.photoURL || null,
+        updatedAt: Date.now(),
+      },
       { merge: true }
     );
-  } catch {
-    // ignore
+
+    // Update partner doc in Firestore
+    const partnerUserRef = doc(db, 'users', partnerData.uid);
+    await setDoc(
+      partnerUserRef,
+      {
+        partnerUid: currentUser.uid,
+        partnerName: currentUser.name,
+        partnerEmail: currentUser.email,
+        partnerPhoto: currentUser.photoURL || null,
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    );
+
+    // Update partnerUid in both user_trackers documents
+    const myTrackerRef = doc(db, 'user_trackers', currentUser.uid);
+    await setDoc(myTrackerRef, { partnerUid: partnerData.uid }, { merge: true });
+
+    const partnerTrackerRef = doc(db, 'user_trackers', partnerData.uid);
+    await setDoc(partnerTrackerRef, { partnerUid: currentUser.uid }, { merge: true });
+
+    // Update local profile
+    currentUser.partnerUid = partnerData.uid;
+    currentUser.partnerName = partnerData.name;
+    currentUser.partnerEmail = partnerData.email;
+    currentUser.partnerPhoto = partnerData.photoURL;
+    saveUserProfileLocal(currentUser);
+
+    sound.playCompletion();
+    showToast('পার্টনার সফলভাবে যুক্ত হয়েছে! 🤝', `${partnerData.name}-এর সাথে কানেক্ট সম্পন্ন।`, 'celebrate');
+
+    return {
+      success: true,
+      message: `${partnerData.name}-এর সাথে সফলভাবে কানেক্ট হয়েছে!`,
+      partner: partnerData,
+    };
+  } catch (err: any) {
+    console.error('Error connecting partner:', err);
+    return {
+      success: false,
+      message: 'পার্টনার কানেক্ট করার সময় ত্রুটি ঘটেছে: ' + (err.message || String(err)),
+    };
+  }
+}
+
+// Disconnect/Unpair Partner
+export async function disconnectPartner(currentUser: UserProfile): Promise<void> {
+  const partnerUid = currentUser.partnerUid;
+
+  currentUser.partnerUid = null;
+  currentUser.partnerName = null;
+  currentUser.partnerEmail = null;
+  currentUser.partnerPhoto = null;
+  saveUserProfileLocal(currentUser);
+
+  if (!currentUser.uid.startsWith('demo_')) {
+    try {
+      const db = getFirestoreDb();
+      const myUserRef = doc(db, 'users', currentUser.uid);
+      await setDoc(
+        myUserRef,
+        {
+          partnerUid: null,
+          partnerName: null,
+          partnerEmail: null,
+          partnerPhoto: null,
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+
+      const myTrackerRef = doc(db, 'user_trackers', currentUser.uid);
+      await setDoc(myTrackerRef, { partnerUid: null }, { merge: true });
+
+      if (partnerUid && !partnerUid.startsWith('demo_')) {
+        const partnerUserRef = doc(db, 'users', partnerUid);
+        await setDoc(
+          partnerUserRef,
+          {
+            partnerUid: null,
+            partnerName: null,
+            partnerEmail: null,
+            partnerPhoto: null,
+            updatedAt: Date.now(),
+          },
+          { merge: true }
+        );
+
+        const partnerTrackerRef = doc(db, 'user_trackers', partnerUid);
+        await setDoc(partnerTrackerRef, { partnerUid: null }, { merge: true });
+      }
+    } catch (err) {
+      console.error('Error disconnecting partner:', err);
+    }
   }
 
-  await syncPodData(updatedPod);
-  showToast('পার্টনার বিচ্ছিন্ন করা হয়েছে', 'আপনি যেকোনো সময় নতুন কোড দিয়ে পার্টনারকে পুনরায় যুক্ত করতে পারবেন।', 'warning');
-  return updatedPod;
+  sound.playTick();
+  showToast('পার্টনারের সংযোগ বিচ্ছিন্ন করা হয়েছে', 'আপনি যেকোনো সময় আবার নতুন কোড দিয়ে কানেক্ট করতে পারবেন।', 'info');
 }

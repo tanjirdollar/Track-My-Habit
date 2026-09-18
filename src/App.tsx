@@ -1,15 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { PodData, Habit, ConnectionStatus, AuthUserProfile } from './types';
+import type { UserProfile, UserTrackerData, Habit, ConnectionStatus } from './types';
 import {
-  getCurrentUserProfile,
-  saveUserProfile,
-  initPodSync,
-  syncPodData,
-  pairPartnerByCodeOrEmail,
-  unpairPartner,
-  createInitialPod,
+  getDemoUserProfile,
   subscribeToAuth,
-  logoutUser,
+  subscribeToMyTracker,
+  subscribeToPartnerTracker,
+  updateMyTracker,
+  createInitialTracker,
+  calculateTrackerStats,
 } from './services/firebase';
 import { Header } from './components/Header';
 import { PartnerBar } from './components/PartnerBar';
@@ -19,434 +17,471 @@ import { AddGoalModal } from './components/AddGoalModal';
 import { LogInputModal } from './components/LogInputModal';
 import { CelebrationModal } from './components/CelebrationModal';
 import { SettingsModal } from './components/SettingsModal';
-import { FirebaseModal } from './components/FirebaseModal';
+import { ConnectPartnerModal } from './components/ConnectPartnerModal';
 import { AuthModal } from './components/AuthModal';
 import { ToastBanner } from './components/ToastBanner';
 import { sound, showToast } from './services/notifications';
-import { LayoutDashboard, BarChart3, LogIn, Sparkles } from 'lucide-react';
-import { toBengaliNumber } from './utils/bengali';
+import { CheckCircle, Users, BarChart3, Sparkles } from 'lucide-react';
+import confetti from 'canvas-confetti';
 
 export default function App() {
-  const [myProfile, setMyProfile] = useState<AuthUserProfile>(() => getCurrentUserProfile());
-  const [pod, setPod] = useState<PodData>(() => createInitialPod(myProfile.podId, myProfile.name));
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'insights'>('dashboard');
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
+  const [currentUser, setCurrentUser] = useState<UserProfile>(() => getDemoUserProfile());
+  const [partnerUser, setPartnerUser] = useState<UserProfile | null>(null);
+  const [myTracker, setMyTracker] = useState<UserTrackerData>(() =>
+    createInitialTracker(currentUser.uid, currentUser.name, currentUser.email)
+  );
+  const [partnerTracker, setPartnerTracker] = useState<UserTrackerData | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('demo');
+  const [activeTab, setActiveTab] = useState<'my_space' | 'partner_space' | 'insights'>('my_space');
 
   // Modals state
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isConnectOpen, setIsConnectOpen] = useState(false);
   const [isAddGoalOpen, setIsAddGoalOpen] = useState(false);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const [selectedHabitForLog, setSelectedHabitForLog] = useState<Habit | null>(null);
   const [isCelebrationOpen, setIsCelebrationOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isFirebaseConfigOpen, setIsFirebaseConfigOpen] = useState(false);
+  const [celebrationHabitName, setCelebrationHabitName] = useState('');
 
-  // Listen to Firebase Auth state
+  // 1. Subscribe to Firebase Auth
   useEffect(() => {
     const unsubAuth = subscribeToAuth((user) => {
       if (user) {
-        setMyProfile(user);
+        setCurrentUser(user);
       }
     });
     return () => unsubAuth();
   }, []);
 
-  // Check notification permission on mount
+  // 2. Check for URL invite parameter on mount
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      setNotificationPermission(Notification.permission);
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const invite = params.get('invite');
+      if (invite && invite !== currentUser.inviteCode) {
+        setIsConnectOpen(true);
+      }
     }
-  }, []);
+  }, [currentUser.inviteCode]);
 
-  // Initialize Real-time synchronization
+  // 3. Subscribe to My Tracker (Owner: Read & Write)
   useEffect(() => {
-    const unsub = initPodSync(
-      myProfile.podId,
-      myProfile,
-      (updatedData) => {
-        setPod(updatedData);
+    const unsub = subscribeToMyTracker(
+      currentUser.uid,
+      currentUser,
+      (data) => {
+        setMyTracker(data);
       },
       (status) => {
         setConnectionStatus(status);
       }
     );
 
-    return () => {
-      unsub();
-    };
-  }, [myProfile.podId, myProfile.uid, myProfile.role]);
+    return () => unsub();
+  }, [currentUser.uid, currentUser.name, currentUser.email, currentUser.partnerUid]);
 
-  const isUserA = myProfile.role === 'userA';
+  // 4. Subscribe to Partner Tracker (Strict Read-Only)
+  useEffect(() => {
+    const unsub = subscribeToPartnerTracker(
+      currentUser.partnerUid,
+      (data) => {
+        setPartnerTracker(data);
+      },
+      (notificationText) => {
+        // Real-time notification when partner completes a habit
+        showToast(
+          `${currentUser.partnerName || 'পার্টনার'} লক্ষ্য পূরণ করেছেন! 🎉`,
+          notificationText,
+          'celebrate'
+        );
+      }
+    );
 
-  // Recalculate health score helper
-  const calculateHealthScore = (habits: Habit[]): number => {
-    if (!habits.length) return 80;
-    let completed = 0;
-    habits.forEach((h) => {
-      const aDone = h.type === 'boolean' ? !!h.completedByMe : h.myProgress >= h.target;
-      const bDone = h.type === 'boolean' ? !!h.completedByPartner : h.partnerProgress >= h.target;
-      if (aDone) completed++;
-      if (bDone) completed++;
-    });
-    const ratio = completed / (habits.length * 2);
-    return Math.min(100, Math.max(50, Math.round(50 + ratio * 50)));
+    return () => unsub();
+  }, [currentUser.partnerUid, currentUser.partnerName]);
+
+  // Trigger celebration confetti
+  const triggerConfetti = () => {
+    try {
+      confetti({
+        particleCount: 70,
+        spread: 60,
+        origin: { y: 0.7 },
+        colors: ['#f43f5e', '#3b82f6', '#10b981', '#f59e0b'],
+      });
+    } catch {}
   };
 
-  // Update progress for numeric habits (+/- or direct)
-  const handleUpdateProgress = useCallback(
-    async (habitId: string, delta: number, absolute?: number) => {
-      setPod((prev) => {
-        const updatedHabits = prev.habits.map((h) => {
-          if (h.id !== habitId) return h;
-
-          let newProgress: number;
-          if (absolute !== undefined) {
-            newProgress = Math.max(0, absolute);
-          } else {
-            const current = isUserA ? h.myProgress : h.partnerProgress;
-            newProgress = Math.max(0, current + delta);
-          }
-
-          const targetReached = newProgress >= h.target;
-          if (targetReached && (isUserA ? h.myProgress < h.target : h.partnerProgress < h.target)) {
-            sound.playCompletion();
-            showToast(`${h.name} সম্পন্ন হয়েছে! 🎉`, `${myProfile.name} লক্ষ্য পূরণ করেছেন।`, 'celebrate');
-          }
-
-          return {
-            ...h,
-            myProgress: isUserA ? newProgress : h.myProgress,
-            partnerProgress: !isUserA ? newProgress : h.partnerProgress,
-            updatedAt: Date.now(),
-          };
-        });
-
-        const newScore = calculateHealthScore(updatedHabits);
-        const targetHabit = updatedHabits.find((h) => h.id === habitId);
-
-        const updatedPod: PodData = {
-          ...prev,
-          habits: updatedHabits,
-          healthScore: newScore,
-          lastAction: {
-            userId: myProfile.uid,
-            userName: myProfile.name,
-            actionText: `${targetHabit?.name || 'লক্ষ্য'}-এ নতুন অগ্রগতি ইনপুট করেছেন`,
-            habitName: targetHabit?.name,
-            timestamp: Date.now(),
-          },
-        };
-
-        syncPodData(updatedPod);
-        return updatedPod;
-      });
-    },
-    [isUserA, myProfile]
-  );
-
-  // Toggle boolean habit
-  const handleToggleBoolean = useCallback(
+  // Toggle Habit completion (My Space only)
+  const handleToggleHabit = useCallback(
     async (habitId: string) => {
-      setPod((prev) => {
-        const updatedHabits = prev.habits.map((h) => {
-          if (h.id !== habitId) return h;
-          const currentDone = isUserA ? !!h.completedByMe : !!h.completedByPartner;
-          const newDone = !currentDone;
+      const habit = myTracker.habits.find((h) => h.id === habitId);
+      if (!habit) return;
 
+      const newCompleted = !habit.completed;
+      const newCurrent = newCompleted ? (habit.target > 0 ? habit.target : 1) : 0;
+
+      if (newCompleted) {
+        sound.playCompletion();
+        triggerConfetti();
+        setCelebrationHabitName(habit.name);
+        setIsCelebrationOpen(true);
+        showToast('অভিনন্দন! লক্ষ্য পূরণ হয়েছে 🎉', habit.name, 'celebrate');
+      } else {
+        sound.playTick();
+      }
+
+      const updatedHabits = myTracker.habits.map((h) => {
+        if (h.id === habitId) {
           return {
             ...h,
-            completedByMe: isUserA ? newDone : h.completedByMe,
-            completedByPartner: !isUserA ? newDone : h.completedByPartner,
-            myProgress: isUserA ? (newDone ? 1 : 0) : h.myProgress,
-            partnerProgress: !isUserA ? (newDone ? 1 : 0) : h.partnerProgress,
+            completed: newCompleted,
+            current: newCurrent,
             updatedAt: Date.now(),
           };
-        });
-
-        const targetHabit = updatedHabits.find((h) => h.id === habitId);
-        const isNowDone = isUserA ? targetHabit?.completedByMe : targetHabit?.completedByPartner;
-
-        const updatedPod: PodData = {
-          ...prev,
-          habits: updatedHabits,
-          healthScore: calculateHealthScore(updatedHabits),
-          lastAction: {
-            userId: myProfile.uid,
-            userName: myProfile.name,
-            actionText: isNowDone
-              ? `${targetHabit?.name} সম্পন্ন করেছেন! ✓`
-              : `${targetHabit?.name} টিক চিহ্ন প্রত্যাহার করেছেন`,
-            habitName: targetHabit?.name,
-            timestamp: Date.now(),
-          },
-        };
-
-        syncPodData(updatedPod);
-        return updatedPod;
+        }
+        return h;
       });
-    },
-    [isUserA, myProfile]
-  );
 
-  // Add new habit
-  const handleAddHabit = useCallback(
-    async (newHabitData: Omit<Habit, 'id' | 'createdAt' | 'updatedAt' | 'myProgress' | 'partnerProgress'>) => {
-      const now = Date.now();
-      const newHabit: Habit = {
-        ...newHabitData,
-        id: 'habit_' + Math.random().toString(36).substring(2, 9),
-        myProgress: 0,
-        partnerProgress: 0,
-        completedByMe: false,
-        completedByPartner: false,
-        createdAt: now,
-        updatedAt: now,
+      const updatedTracker: UserTrackerData = {
+        ...myTracker,
+        habits: updatedHabits,
+        lastAction: {
+          actionText: newCompleted
+            ? `"${habit.name}" লক্ষ্য সম্পন্ন করেছেন`
+            : `"${habit.name}" আনচেক করেছেন`,
+          habitName: habit.name,
+          timestamp: Date.now(),
+        },
       };
 
-      setPod((prev) => {
-        const updatedPod: PodData = {
-          ...prev,
-          habits: [...prev.habits, newHabit],
-          lastAction: {
-            userId: myProfile.uid,
-            userName: myProfile.name,
-            actionText: `নতুন লক্ষ্য যুক্ত করেছেন: "${newHabit.name}"`,
-            habitName: newHabit.name,
-            timestamp: now,
-          },
-        };
-        syncPodData(updatedPod);
-        return updatedPod;
+      setMyTracker(updatedTracker);
+      await updateMyTracker(currentUser.uid, updatedTracker);
+    },
+    [myTracker, currentUser.uid]
+  );
+
+  // Increment/Decrement Habit progress (My Space only)
+  const handleIncrementHabit = useCallback(
+    async (habitId: string, delta: number) => {
+      const habit = myTracker.habits.find((h) => h.id === habitId);
+      if (!habit) return;
+
+      const newCurrent = Math.max(0, (habit.current || 0) + delta);
+      const isNowDone = habit.target > 0 && newCurrent >= habit.target;
+      const wasDone = habit.target > 0 && habit.current >= habit.target;
+
+      sound.playTick();
+
+      if (isNowDone && !wasDone) {
+        sound.playCompletion();
+        triggerConfetti();
+        setCelebrationHabitName(habit.name);
+        setIsCelebrationOpen(true);
+        showToast('অভিনন্দন! লক্ষ্য পূরণ হয়েছে 🎉', habit.name, 'celebrate');
+      }
+
+      const updatedHabits = myTracker.habits.map((h) => {
+        if (h.id === habitId) {
+          return {
+            ...h,
+            current: newCurrent,
+            completed: isNowDone,
+            updatedAt: Date.now(),
+          };
+        }
+        return h;
       });
 
-      showToast('নতুন লক্ষ্য যুক্ত করা হয়েছে!', newHabit.name, 'success');
+      const updatedTracker: UserTrackerData = {
+        ...myTracker,
+        habits: updatedHabits,
+        lastAction: {
+          actionText: `"${habit.name}" অগ্রগতি আপডেট করেছেন (${newCurrent} ${habit.unit})`,
+          habitName: habit.name,
+          timestamp: Date.now(),
+        },
+      };
+
+      setMyTracker(updatedTracker);
+      await updateMyTracker(currentUser.uid, updatedTracker);
+    },
+    [myTracker, currentUser.uid]
+  );
+
+  // Save manual log value (My Space only)
+  const handleSaveLogValue = useCallback(
+    async (habitId: string, value: number) => {
+      const habit = myTracker.habits.find((h) => h.id === habitId);
+      if (!habit) return;
+
+      const isNowDone = habit.target > 0 && value >= habit.target;
+      const wasDone = habit.target > 0 && habit.current >= habit.target;
+
+      if (isNowDone && !wasDone) {
+        sound.playCompletion();
+        triggerConfetti();
+        setCelebrationHabitName(habit.name);
+        setIsCelebrationOpen(true);
+        showToast('টার্গেট পূরণ হয়েছে! 🌟', habit.name, 'celebrate');
+      }
+
+      const updatedHabits = myTracker.habits.map((h) => {
+        if (h.id === habitId) {
+          return {
+            ...h,
+            current: value,
+            completed: isNowDone,
+            updatedAt: Date.now(),
+          };
+        }
+        return h;
+      });
+
+      const updatedTracker: UserTrackerData = {
+        ...myTracker,
+        habits: updatedHabits,
+        lastAction: {
+          actionText: `"${habit.name}" ${value} ${habit.unit} লগ করেছেন`,
+          habitName: habit.name,
+          timestamp: Date.now(),
+        },
+      };
+
+      setMyTracker(updatedTracker);
+      await updateMyTracker(currentUser.uid, updatedTracker);
+    },
+    [myTracker, currentUser.uid]
+  );
+
+  // Add new Goal (My Space only)
+  const handleAddGoal = useCallback(
+    async (newGoalData: Omit<Habit, 'id' | 'createdAt' | 'updatedAt' | 'current' | 'completed'>) => {
+      const newHabit: Habit = {
+        ...newGoalData,
+        id: 'h_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        current: 0,
+        completed: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      const updatedHabits = [...myTracker.habits, newHabit];
+      const updatedTracker: UserTrackerData = {
+        ...myTracker,
+        habits: updatedHabits,
+        lastAction: {
+          actionText: `নতুন লক্ষ্য যোগ করেছেন: "${newHabit.name}"`,
+          habitName: newHabit.name,
+          timestamp: Date.now(),
+        },
+      };
+
+      setMyTracker(updatedTracker);
+      await updateMyTracker(currentUser.uid, updatedTracker);
       sound.playCompletion();
+      showToast('নতুন লক্ষ্য যোগ করা হয়েছে! 🎯', newHabit.name, 'success');
     },
-    [myProfile]
+    [myTracker, currentUser.uid]
   );
 
-  // Delete habit
-  const handleDeleteHabit = useCallback(
+  // Delete Goal (My Space only)
+  const handleDeleteGoal = useCallback(
     async (habitId: string) => {
-      const habitToDelete = pod.habits.find((h) => h.id === habitId);
-      setPod((prev) => {
-        const updatedPod: PodData = {
-          ...prev,
-          habits: prev.habits.filter((h) => h.id !== habitId),
-          lastAction: {
-            userId: myProfile.uid,
-            userName: myProfile.name,
-            actionText: `লক্ষ্য মুছে ফেলেছেন: "${habitToDelete?.name || ''}"`,
-            timestamp: Date.now(),
-          },
+      const habit = myTracker.habits.find((h) => h.id === habitId);
+      if (!habit) return;
+
+      if (window.confirm(`আপনি কি "${habit.name}" লক্ষ্যটি মুছে ফেলতে চান?`)) {
+        const updatedHabits = myTracker.habits.filter((h) => h.id !== habitId);
+        const updatedTracker: UserTrackerData = {
+          ...myTracker,
+          habits: updatedHabits,
         };
-        syncPodData(updatedPod);
-        return updatedPod;
-      });
-      showToast('লক্ষ্যটি মুছে ফেলা হয়েছে', habitToDelete?.name, 'info');
+
+        setMyTracker(updatedTracker);
+        await updateMyTracker(currentUser.uid, updatedTracker);
+        sound.playTick();
+        showToast('লক্ষ্য মুছে ফেলা হয়েছে', habit.name, 'info');
+      }
     },
-    [pod.habits, myProfile]
+    [myTracker, currentUser.uid]
   );
-
-  // Pair partner
-  const handlePairPartner = async (partnerCodeOrEmail: string) => {
-    const updated = await pairPartnerByCodeOrEmail(pod, partnerCodeOrEmail, myProfile);
-    setPod(updated);
-  };
-
-  // Unpair partner
-  const handleUnpairPartner = async () => {
-    const updated = await unpairPartner(pod, myProfile);
-    setPod(updated);
-  };
-
-  // Switch role perspective (A <-> B)
-  const handleSwitchPerspective = () => {
-    sound.playTick();
-    const newRole = myProfile.role === 'userA' ? 'userB' : 'userA';
-    const newProfile: AuthUserProfile = {
-      ...myProfile,
-      role: newRole,
-      name: myProfile.name || (newRole === 'userA' ? 'আমি' : 'পার্টনার'),
-    };
-    setMyProfile(newProfile);
-    saveUserProfile(newProfile);
-    showToast(
-      `ভিউ পরিবর্তিত: ${newRole === 'userA' ? 'আমি (User A)' : 'পার্টনার (User B)'}`,
-      'এখন আপনি দেখতে পাচ্ছেন পার্টনারের দিক থেকে স্ক্রিন ও ইনপুট কেমন কাজ করে!',
-      'info'
-    );
-  };
-
-  // Update user name
-  const handleUpdateUserName = (newName: string) => {
-    const newProfile: AuthUserProfile = { ...myProfile, name: newName };
-    setMyProfile(newProfile);
-    saveUserProfile(newProfile);
-  };
-
-  // Logout user
-  const handleLogout = async () => {
-    await logoutUser();
-    const demo = getCurrentUserProfile();
-    setMyProfile(demo);
-    showToast('লগআউট সম্পন্ন হয়েছে', 'আপনি এখন ডেমো অ্যাকাউন্ট হিসেবে আছেন।', 'info');
-  };
-
-  const isDemo = !myProfile.email || myProfile.uid.startsWith('demo_');
 
   return (
-    <div className="min-h-screen bg-[#0b0e17] text-slate-100 flex flex-col selection:bg-rose-500 selection:text-white">
-      {/* Real-time Toast Notifications */}
+    <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col selection:bg-rose-500 selection:text-white">
+      {/* Toast Notifications container */}
       <ToastBanner />
 
       {/* App Header */}
       <Header
-        currentStreak={pod.currentStreak || 12}
+        currentUser={currentUser}
         connectionStatus={connectionStatus}
-        currentUser={myProfile}
+        streak={myTracker.currentStreak}
         onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenCelebration={() => setIsCelebrationOpen(true)}
         onOpenAuth={() => setIsAuthOpen(true)}
-        notificationPermission={notificationPermission}
+        onOpenConnect={() => setIsConnectOpen(true)}
       />
 
-      {/* Account Reminder Banner if Demo */}
-      {isDemo && (
-        <aside aria-label="Account login banner" className="mx-4 mt-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-transparent border border-amber-500/20 flex items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-2 text-amber-200">
-            <Sparkles className="w-4 h-4 shrink-0 text-amber-400" />
-            <span>
-              পার্টনারের সাথে আলাদা অ্যাকাউন্টে লাইভ সিঙ্ক করতে লগইন করুন
-            </span>
-          </div>
-          <button
-            onClick={() => setIsAuthOpen(true)}
-            className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold border border-amber-500/30 transition-all cursor-pointer shrink-0 flex items-center gap-1"
-          >
-            <LogIn className="w-3 h-3" />
-            <span>লগইন / সাইন আপ</span>
-          </button>
-        </aside>
-      )}
-
-      {/* Partner Status Bar */}
-      <div className="max-w-2xl w-full mx-auto">
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 pt-5 pb-24">
+        {/* Top Space Switcher Bar (My Space vs Partner Space) */}
         <PartnerBar
-          myProfile={myProfile}
-          partner={isUserA ? pod.userB : pod.userA}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-          onSwitchPerspective={handleSwitchPerspective}
+          currentUser={currentUser}
+          partnerUser={partnerUser}
+          myTracker={myTracker}
+          partnerTracker={partnerTracker}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onOpenConnectModal={() => setIsConnectOpen(true)}
+          connectionStatus={connectionStatus}
         />
-      </div>
 
-      {/* Main Content View */}
-      <main className="flex-1 max-w-2xl w-full mx-auto p-4">
-        {activeTab === 'dashboard' ? (
+        {/* View 1: My Space (Full Edit Access) */}
+        {activeTab === 'my_space' && (
           <DashboardView
-            pod={pod}
-            isUserA={isUserA}
-            onUpdateProgress={handleUpdateProgress}
-            onToggleBoolean={handleToggleBoolean}
-            onOpenAddModal={() => setIsAddGoalOpen(true)}
-            onOpenLogModal={(habit) => {
-              setSelectedHabitForLog(habit);
+            tracker={myTracker}
+            isReadOnly={false}
+            partnerName={currentUser.partnerName || 'পার্টনার'}
+            isConnected={!!currentUser.partnerUid}
+            onToggleHabit={handleToggleHabit}
+            onIncrementHabit={handleIncrementHabit}
+            onOpenAddGoal={() => setIsAddGoalOpen(true)}
+            onOpenLogModal={(h) => {
+              setSelectedHabitForLog(h);
               setIsLogModalOpen(true);
             }}
-            onDeleteHabit={handleDeleteHabit}
+            onDeleteHabit={handleDeleteGoal}
           />
-        ) : (
-          <InsightsView pod={pod} />
+        )}
+
+        {/* View 2: Partner's Space (Strict Read-Only Access) */}
+        {activeTab === 'partner_space' && (
+          <DashboardView
+            tracker={partnerTracker}
+            isReadOnly={true}
+            partnerName={currentUser.partnerName || 'পার্টনার'}
+            isConnected={!!currentUser.partnerUid}
+            onOpenConnectModal={() => setIsConnectOpen(true)}
+          />
+        )}
+
+        {/* View 3: Insights & Analytics */}
+        {activeTab === 'insights' && (
+          <InsightsView
+            myTracker={myTracker}
+            partnerTracker={partnerTracker}
+          />
         )}
       </main>
 
-      {/* Bottom Tab Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 bg-[#101524]/90 backdrop-blur-xl border-t border-white/5 py-2 px-6 flex justify-around items-center max-w-2xl mx-auto">
-        <button
-          onClick={() => setActiveTab('dashboard')}
-          className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all cursor-pointer ${
-            activeTab === 'dashboard'
-              ? 'text-rose-400 font-bold'
-              : 'text-slate-400 hover:text-slate-200 font-medium'
-          }`}
-        >
-          <LayoutDashboard className={`w-5 h-5 ${activeTab === 'dashboard' ? 'stroke-[2.5]' : 'stroke-[1.8]'}`} />
-          <span className="text-xs tracking-wide">একসাথে</span>
-        </button>
+      {/* Bottom Floating Navigation (Mobile & Desktop) */}
+      <nav className="fixed bottom-0 left-0 right-0 z-30 bg-[#0c111e]/90 backdrop-blur-lg border-t border-white/10 py-2 sm:py-2.5 px-4">
+        <div className="max-w-md mx-auto flex items-center justify-around">
+          <button
+            onClick={() => setActiveTab('my_space')}
+            className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'my_space'
+                ? 'text-rose-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <CheckCircle className="w-5 h-5" />
+            <span className="text-[11px]">আমার স্পেস</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('insights')}
-          className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all cursor-pointer ${
-            activeTab === 'insights'
-              ? 'text-rose-400 font-bold'
-              : 'text-slate-400 hover:text-slate-200 font-medium'
-          }`}
-        >
-          <BarChart3 className={`w-5 h-5 ${activeTab === 'insights' ? 'stroke-[2.5]' : 'stroke-[1.8]'}`} />
-          <span className="text-xs tracking-wide">ইনসাইটস</span>
-        </button>
+          <button
+            onClick={() => setActiveTab('partner_space')}
+            className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'partner_space'
+                ? 'text-indigo-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Users className="w-5 h-5" />
+            <span className="text-[11px]">পার্টনার ভিউ</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('insights')}
+            className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'insights'
+                ? 'text-amber-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <BarChart3 className="w-5 h-5" />
+            <span className="text-[11px]">ইনসাইটস</span>
+          </button>
+        </div>
       </nav>
 
-      {/* Auth Modal (Login / Sign Up) */}
+      {/* Modals */}
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         onAuthSuccess={(user) => {
-          setMyProfile(user);
+          setCurrentUser(user);
+          setIsAuthOpen(false);
         }}
       />
 
-      {/* Modals */}
+      <ConnectPartnerModal
+        isOpen={isConnectOpen}
+        onClose={() => setIsConnectOpen(false)}
+        currentUser={currentUser}
+        onPartnerConnected={(partner) => {
+          setCurrentUser((prev) => ({
+            ...prev,
+            partnerUid: partner.uid,
+            partnerName: partner.name,
+            partnerEmail: partner.email,
+          }));
+          setIsConnectOpen(false);
+        }}
+        onPartnerDisconnected={() => {
+          setCurrentUser((prev) => ({
+            ...prev,
+            partnerUid: null,
+            partnerName: null,
+            partnerEmail: null,
+          }));
+          setPartnerTracker(null);
+        }}
+      />
+
       <AddGoalModal
         isOpen={isAddGoalOpen}
         onClose={() => setIsAddGoalOpen(false)}
-        onAddHabit={handleAddHabit}
+        onAddHabit={handleAddGoal}
       />
 
       <LogInputModal
         isOpen={isLogModalOpen}
-        isUserA={isUserA}
         habit={selectedHabitForLog}
         onClose={() => {
           setIsLogModalOpen(false);
           setSelectedHabitForLog(null);
         }}
-        onSaveValue={(habitId, val) => handleUpdateProgress(habitId, 0, val)}
+        onSaveValue={handleSaveLogValue}
       />
 
       <CelebrationModal
         isOpen={isCelebrationOpen}
+        habitName={celebrationHabitName}
         onClose={() => setIsCelebrationOpen(false)}
-        streakCount={pod.currentStreak || 12}
       />
 
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        pod={pod}
-        myProfile={myProfile}
-        connectionStatus={connectionStatus}
-        notificationPermission={notificationPermission}
-        onOpenFirebaseConfig={() => {
-          setIsSettingsOpen(false);
-          setIsFirebaseConfigOpen(true);
+        currentUser={currentUser}
+        onLogout={() => {
+          setCurrentUser(getDemoUserProfile());
+          setPartnerTracker(null);
         }}
-        onOpenAuthModal={() => {
-          setIsAuthOpen(true);
-        }}
-        onLogout={handleLogout}
-        onPairPartner={handlePairPartner}
-        onUnpairPartner={handleUnpairPartner}
-        onUpdateUserName={handleUpdateUserName}
-      />
-
-      <FirebaseModal
-        isOpen={isFirebaseConfigOpen}
-        onClose={() => setIsFirebaseConfigOpen(false)}
-        onConfigSaved={() => {
-          setMyProfile((prev) => ({ ...prev }));
-        }}
+        onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenConnect={() => setIsConnectOpen(true)}
       />
     </div>
   );

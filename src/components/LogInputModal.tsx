@@ -6,7 +6,6 @@ import { sound } from '../services/notifications';
 
 interface LogInputModalProps {
   habit: Habit | null;
-  isUserA: boolean;
   isOpen: boolean;
   onClose: () => void;
   onSaveValue: (habitId: string, value: number) => void;
@@ -14,7 +13,6 @@ interface LogInputModalProps {
 
 export const LogInputModal: React.FC<LogInputModalProps> = ({
   habit,
-  isUserA,
   isOpen,
   onClose,
   onSaveValue,
@@ -23,10 +21,9 @@ export const LogInputModal: React.FC<LogInputModalProps> = ({
 
   useEffect(() => {
     if (habit) {
-      const current = isUserA ? habit.myProgress : habit.partnerProgress;
-      setVal(current);
+      setVal(habit.current || 0);
     }
-  }, [habit, isUserA, isOpen]);
+  }, [habit, isOpen]);
 
   if (!isOpen || !habit) return null;
 
@@ -61,7 +58,7 @@ export const LogInputModal: React.FC<LogInputModalProps> = ({
           </h3>
           <button
             onClick={onClose}
-            className="p-1 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+            className="p-1 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -87,7 +84,7 @@ export const LogInputModal: React.FC<LogInputModalProps> = ({
             <button
               type="button"
               onClick={handleDec}
-              className="w-12 h-12 rounded-2xl bg-white/10 hover:bg-white/15 text-white flex items-center justify-center text-xl font-bold active:scale-95 transition-all"
+              className="w-12 h-12 rounded-2xl bg-white/10 hover:bg-white/15 text-white flex items-center justify-center text-xl font-bold active:scale-95 transition-all cursor-pointer"
             >
               <Minus className="w-5 h-5" />
             </button>
@@ -102,7 +99,7 @@ export const LogInputModal: React.FC<LogInputModalProps> = ({
             <button
               type="button"
               onClick={handleInc}
-              className="w-12 h-12 rounded-2xl bg-rose-500/25 hover:bg-rose-500/35 text-rose-300 border border-rose-500/30 flex items-center justify-center text-xl font-bold active:scale-95 transition-all"
+              className="w-12 h-12 rounded-2xl bg-rose-500/25 hover:bg-rose-500/35 text-rose-300 border border-rose-500/30 flex items-center justify-center text-xl font-bold active:scale-95 transition-all cursor-pointer"
             >
               <Plus className="w-5 h-5" />
             </button>

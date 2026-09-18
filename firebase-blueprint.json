@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Registered user profile with Google Auth details and partner connection link",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 150 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "inviteCode": { "type": "string", "maxLength": 30 },
+        "partnerUid": { "type": "string", "maxLength": 128 },
+        "partnerName": { "type": "string", "maxLength": 100 },
+        "partnerEmail": { "type": "string", "maxLength": 150 },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["uid", "name", "email", "inviteCode"]
+    },
+    "UserTrackerData": {
+      "title": "UserTrackerData",
+      "description": "User's personal independent habit tracking state and streak history",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 100 },
+        "userEmail": { "type": "string", "maxLength": 150 },
+        "partnerUid": { "type": "string", "maxLength": 128 },
+        "habits": { "type": "array" },
+        "currentStreak": { "type": "number" },
+        "bestStreak": { "type": "number" },
+        "healthScore": { "type": "number" },
+        "todayCompletionRate": { "type": "number" },
+        "todayCompletedCount": { "type": "number" },
+        "todayTotalCount": { "type": "number" },
+        "lastUpdated": { "type": "number" }
+      },
+      "required": ["userId", "userName", "habits", "currentStreak", "healthScore"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile collection containing account identity and invite code"
+    },
+    "/user_trackers/{userId}": {
+      "schema": "UserTrackerData",
+      "description": "Individual habit tracker collection. Owner has full read/write; linked partner has strict read-only access"
+    }
+  }
+}

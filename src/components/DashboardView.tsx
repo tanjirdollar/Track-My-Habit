@@ -1,166 +1,207 @@
 import React from 'react';
-import { Plus } from 'lucide-react';
-import type { Habit, PodData } from '../types';
+import { Plus, Flame, CheckCircle2, ShieldCheck, Lock, Users, Sparkles, Link2 } from 'lucide-react';
+import type { UserTrackerData, Habit } from '../types';
 import { HabitCard } from './HabitCard';
 import { toBengaliNumber } from '../utils/bengali';
 
 interface DashboardViewProps {
-  pod: PodData;
-  isUserA: boolean;
-  onUpdateProgress: (habitId: string, delta: number, absolute?: number) => void;
-  onToggleBoolean: (habitId: string) => void;
-  onOpenAddModal: () => void;
-  onOpenLogModal: (habit: Habit) => void;
-  onDeleteHabit: (habitId: string) => void;
+  tracker: UserTrackerData | null;
+  isReadOnly?: boolean;
+  partnerName?: string;
+  isConnected?: boolean;
+  onToggleHabit?: (id: string) => void;
+  onIncrementHabit?: (id: string, delta: number) => void;
+  onOpenAddGoal?: () => void;
+  onOpenLogModal?: (habit: Habit) => void;
+  onDeleteHabit?: (id: string) => void;
+  onOpenConnectModal?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
-  pod,
-  isUserA,
-  onUpdateProgress,
-  onToggleBoolean,
-  onOpenAddModal,
+  tracker,
+  isReadOnly = false,
+  partnerName = 'পার্টনার',
+  isConnected = false,
+  onToggleHabit,
+  onIncrementHabit,
+  onOpenAddGoal,
   onOpenLogModal,
   onDeleteHabit,
+  onOpenConnectModal,
 }) => {
-  const habits = pod.habits || [];
+  // If viewing partner space but partner is not connected yet
+  if (isReadOnly && (!isConnected || !tracker)) {
+    return (
+      <div className="rounded-3xl bg-[#111728] border border-white/10 p-6 sm:p-10 text-center space-y-6 shadow-2xl">
+        <div className="w-16 h-16 rounded-3xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto border border-indigo-500/30 shadow-lg shadow-indigo-500/10">
+          <Users className="w-8 h-8" />
+        </div>
 
-  // Calculate overall metrics
-  let totalGoals = habits.length * 2; // My goals + partner goals
-  let completedCount = 0;
-  let myDoneCount = 0;
-  let partnerDoneCount = 0;
+        <div className="max-w-md mx-auto space-y-2">
+          <h3 className="text-xl font-bold text-white tracking-wide">
+            পার্টনারের সাথে এখনো যুক্ত হননি
+          </h3>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            পার্টনারের সারাদিনের অভ্যাস ও অগ্রগতি লাইভ দেখতে তাকে যুক্ত করুন। কানেক্ট হওয়ার পর তিনি তার ফোন থেকে ডেটা দিলে আপনি এখানে সরাসরি রিয়েল-টাইমে দেখতে পাবেন (রিড-ওনলি)।
+          </p>
+        </div>
 
-  habits.forEach((h) => {
-    const myVal = isUserA ? h.myProgress : h.partnerProgress;
-    const partnerVal = isUserA ? h.partnerProgress : h.myProgress;
+        <button
+          onClick={onOpenConnectModal}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold text-sm shadow-xl shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer"
+        >
+          <Link2 className="w-4 h-4" />
+          <span>পার্টনার কানেক্ট করুন</span>
+        </button>
+      </div>
+    );
+  }
 
-    const myDone = h.type === 'boolean'
-      ? (isUserA ? !!h.completedByMe : !!h.completedByPartner)
-      : myVal >= h.target;
+  if (!tracker) {
+    return (
+      <div className="text-center py-12 text-slate-400">
+        তথ্য লোড হচ্ছে...
+      </div>
+    );
+  }
 
-    const partnerDone = h.type === 'boolean'
-      ? (isUserA ? !!h.completedByPartner : !!h.completedByMe)
-      : partnerVal >= h.target;
-
-    if (myDone) {
-      completedCount++;
-      myDoneCount++;
-    }
-    if (partnerDone) {
-      completedCount++;
-      partnerDoneCount++;
-    }
-  });
-
-  const overallPercent = totalGoals > 0 ? Math.round((completedCount / totalGoals) * 100) : 0;
-
-  // SVG Circular arc calculations (radius 50 -> circumference 2 * pi * 50 = 314.159)
-  const circumference = 2 * Math.PI * 50;
-  const strokeDashoffset = circumference - (circumference * overallPercent) / 100;
+  const {
+    todayCompletionRate,
+    todayCompletedCount,
+    todayTotalCount,
+    currentStreak,
+    habits,
+    userName,
+  } = tracker;
 
   return (
-    <div className="space-y-4 pb-24">
-      {/* Top Overall Progress Ring Card */}
-      <div className="ios-card p-5 relative overflow-hidden bg-gradient-to-br from-[#151c30] to-[#0f1424]">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex-1 space-y-2">
-            <h2 className="text-lg font-bold text-white tracking-wide">
-              আজকের সার্বিক লক্ষ্য
-            </h2>
-            <p className="text-sm text-slate-300">
-              আজকের যৌথ লক্ষ্য পূরণ:{' '}
-              <strong className="text-rose-400 font-num font-bold text-base">
-                {toBengaliNumber(overallPercent)}%
-              </strong>
-            </p>
-
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs font-semibold text-rose-300 font-num">
-                <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                আমার লক্ষ্য: {toBengaliNumber(myDoneCount)}/{toBengaliNumber(habits.length)}
+    <div className="space-y-6 animate-fade-in">
+      {/* Space Notice Header if Read-Only */}
+      {isReadOnly ? (
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-between gap-3 text-xs text-indigo-200 shadow-lg">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-xl bg-indigo-500/30 flex items-center justify-center text-indigo-300">
+              <Lock className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="font-bold text-white">
+                {partnerName}-এর ব্যক্তিগত স্পেস (Read-Only)
               </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-xs font-semibold text-cyan-300 font-num">
-                <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
-                পার্টনারের লক্ষ্য: {toBengaliNumber(partnerDoneCount)}/{toBengaliNumber(habits.length)}
-              </span>
+              <p className="text-[11px] text-indigo-300/80">
+                পার্টনারের লাইভ অগ্রগতি দৃশ্যমান। আপনি কোনো কিছু এডিট বা টিক করতে পারবেন না।
+              </p>
             </div>
           </div>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            লাইভ
+          </span>
+        </div>
+      ) : null}
 
-          {/* Circular Progress Ring */}
-          <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
-            <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
-              <defs>
-                <linearGradient id="summary-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#f43f5e" />
-                  <stop offset="60%" stopColor="#f59e0b" />
-                  <stop offset="100%" stopColor="#06b6d4" />
-                </linearGradient>
-              </defs>
-              <circle
-                className="arc-bg"
-                cx="60"
-                cy="60"
-                r="50"
-              />
-              <circle
-                className="arc-fill"
-                cx="60"
-                cy="60"
-                r="50"
-                strokeDasharray={circumference}
-                strokeDashoffset={strokeDashoffset}
-              />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-xl font-bold font-num text-white tracking-tight">
-                {toBengaliNumber(overallPercent)}%
-              </span>
-              <span className="text-[10px] text-slate-400 font-medium">যৌথ অগ্রগতি</span>
-            </div>
+      {/* Progress & Stat Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+        {/* Today's Overall Rate */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-[#111728] border border-white/10 shadow-xl space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
+            <span>আজকের সামগ্রিক অগ্রগতি</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl sm:text-4xl font-black text-white">
+              {toBengaliNumber(todayCompletionRate)}%
+            </span>
+            <span className="text-xs text-slate-400 font-semibold">
+              ({toBengaliNumber(todayCompletedCount)} / {toBengaliNumber(todayTotalCount)})
+            </span>
+          </div>
+          <div className="w-full h-2 rounded-full bg-black/40 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                isReadOnly
+                  ? 'bg-gradient-to-r from-indigo-500 to-cyan-400'
+                  : 'bg-gradient-to-r from-rose-500 to-amber-500'
+              }`}
+              style={{ width: `${todayCompletionRate}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Current Streak */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-[#111728] border border-white/10 shadow-xl space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
+            <span>স্ট্রিক (Streak)</span>
+            <Flame className="w-4 h-4 text-amber-400" />
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-3xl sm:text-4xl font-black text-amber-400">
+              {toBengaliNumber(currentStreak)}
+            </span>
+            <span className="text-xs text-slate-400 font-semibold">দিন টানা</span>
+          </div>
+          <p className="text-[11px] text-slate-500">প্রতিদিনের লক্ষ্য পূরণ করে বজায় রাখুন</p>
+        </div>
+
+        {/* User Identity / Owner Tag */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-[#111728] border border-white/10 shadow-xl space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
+            <span>ট্র্যাকার মালিক</span>
+            <ShieldCheck className="w-4 h-4 text-indigo-400" />
+          </div>
+          <div className="text-base font-bold text-white truncate">
+            {isReadOnly ? partnerName : `${userName || 'আমি'} (My Space)`}
+          </div>
+          <p className="text-[11px] text-slate-400">
+            {isReadOnly ? 'পার্টনার ইনপুট নিয়ন্ত্রণ করেন' : 'আপনার স্বাধীন ট্র্যাকিং স্পেস'}
+          </p>
         </div>
       </div>
 
-      {/* Widget Grid */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-3.5" id="widgets-container">
-        {habits.map((habit) => (
-          <HabitCard
-            key={habit.id}
-            habit={habit}
-            isUserA={isUserA}
-            onUpdateProgress={onUpdateProgress}
-            onToggleBoolean={onToggleBoolean}
-            onOpenLogModal={onOpenLogModal}
-            onDeleteHabit={onDeleteHabit}
-          />
-        ))}
+      {/* Habits List Header */}
+      <div className="flex items-center justify-between pt-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-base sm:text-lg font-bold text-white tracking-wide">
+            {isReadOnly ? `${partnerName}-এর আজকের লক্ষ্যসমূহ` : 'আমার আজকের লক্ষ্যসমূহ'}
+          </h3>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-slate-400 font-medium">
+            {toBengaliNumber(habits.length)}টি
+          </span>
+        </div>
 
-        {habits.length === 0 && (
-          <div className="col-span-full py-12 px-4 text-center ios-card border-dashed">
-            <p className="text-slate-400 text-sm mb-3">এখনো কোনো লক্ষ্য যুক্ত করা হয়নি।</p>
-            <button
-              onClick={onOpenAddModal}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-500 text-white font-semibold text-sm hover:bg-rose-600 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              প্রথম লক্ষ্য যোগ করুন
-            </button>
-          </div>
+        {!isReadOnly && onOpenAddGoal && (
+          <button
+            onClick={onOpenAddGoal}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-bold text-xs shadow-md shadow-rose-500/20 active:scale-95 transition-all cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>নতুন লক্ষ্য যোগ</span>
+          </button>
         )}
-      </section>
-
-      {/* Floating Action Button (FAB) */}
-      <div className="fixed bottom-20 right-4 z-20 sm:right-6">
-        <button
-          onClick={onOpenAddModal}
-          id="open-add-goal-btn"
-          className="flex items-center gap-2 px-5 py-3.5 rounded-2xl bg-gradient-to-r from-rose-500 to-amber-500 text-white font-bold text-sm shadow-[0_8px_25px_rgba(244,63,94,0.45)] hover:shadow-[0_12px_32px_rgba(244,63,94,0.6)] hover:scale-105 active:scale-95 transition-all cursor-pointer"
-        >
-          <Plus className="w-5 h-5 stroke-[2.5]" />
-          <span>নতুন লক্ষ্য যোগ করুন</span>
-        </button>
       </div>
+
+      {/* Habits Grid */}
+      {habits.length === 0 ? (
+        <div className="text-center py-10 rounded-2xl bg-[#111728] border border-white/5 text-slate-400 text-sm">
+          {isReadOnly
+            ? 'পার্টনার এখনো কোনো অভ্যাস বা লক্ষ্য যোগ করেননি।'
+            : 'আপনার এখনো কোনো লক্ষ্য নেই। উপরের "নতুন লক্ষ্য যোগ" বাটনে ক্লিক করুন।'}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          {habits.map((habit) => (
+            <HabitCard
+              key={habit.id}
+              habit={habit}
+              isReadOnly={isReadOnly}
+              partnerName={partnerName}
+              onToggle={onToggleHabit}
+              onIncrement={onIncrementHabit}
+              onOpenLogModal={onOpenLogModal}
+              onDelete={onDeleteHabit}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 };

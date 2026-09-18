@@ -5,7 +5,7 @@ import type { Habit, HabitFrequency, HabitType } from '../types';
 interface AddGoalModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddHabit: (habit: Omit<Habit, 'id' | 'createdAt' | 'updatedAt' | 'myProgress' | 'partnerProgress'>) => void;
+  onAddHabit: (habit: Omit<Habit, 'id' | 'createdAt' | 'updatedAt' | 'current' | 'completed'>) => void;
 }
 
 interface Preset {

@@ -67,6 +67,11 @@ class SoundFx {
     }
   }
 
+  // Bell chime for partner milestones
+  playBell() {
+    this.playPartnerUpdate();
+  }
+
   // Partner sync chime
   playPartnerUpdate() {
     try {
