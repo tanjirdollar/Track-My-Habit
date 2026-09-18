@@ -65,14 +65,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     );
   }
 
-  const {
-    todayCompletionRate,
-    todayCompletedCount,
-    todayTotalCount,
-    currentStreak,
-    habits,
-    userName,
-  } = tracker;
+  const todayCompletionRate = typeof tracker.todayCompletionRate === 'number' && !isNaN(tracker.todayCompletionRate) ? tracker.todayCompletionRate : 0;
+  const todayCompletedCount = typeof tracker.todayCompletedCount === 'number' && !isNaN(tracker.todayCompletedCount) ? tracker.todayCompletedCount : 0;
+  const todayTotalCount = typeof tracker.todayTotalCount === 'number' && !isNaN(tracker.todayTotalCount) ? tracker.todayTotalCount : 0;
+  const currentStreak = typeof tracker.currentStreak === 'number' && !isNaN(tracker.currentStreak) ? tracker.currentStreak : 0;
+  const habits = Array.isArray(tracker.habits) ? tracker.habits : [];
+  const userName = tracker.userName || 'আমি';
 
   return (
     <div className="space-y-6 animate-fade-in">

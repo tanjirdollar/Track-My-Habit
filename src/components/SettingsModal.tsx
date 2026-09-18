@@ -102,18 +102,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {currentUser.photoURL ? (
                 <img
                   src={currentUser.photoURL}
-                  alt={currentUser.name}
+                  alt={currentUser.name || 'User'}
                   className="w-12 h-12 rounded-2xl object-cover border border-white/20"
+                  referrerPolicy="no-referrer"
                 />
               ) : (
                 <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-rose-500 to-amber-500 flex items-center justify-center text-white font-bold text-lg shadow-md">
-                  {currentUser.name.charAt(0)}
+                  {(currentUser.name || 'ইউ').charAt(0)}
                 </div>
               )}
 
               <div className="flex-1 min-w-0">
                 <h4 className="text-sm font-bold text-white truncate">
-                  {currentUser.name}
+                  {currentUser.name || 'ইউজার'}
                 </h4>
                 <p className="text-xs text-slate-400 truncate">
                   {currentUser.email || 'কোনো ইমেইল যুক্ত নেই'}
@@ -159,7 +160,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-xs">
-                      {(currentUser.partnerName || 'P').charAt(0)}
+                      {(currentUser.partnerName || 'পা').charAt(0)}
                     </div>
                     <div>
                       <div className="text-xs font-bold text-white">

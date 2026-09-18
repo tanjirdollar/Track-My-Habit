@@ -94,16 +94,17 @@ export const Header: React.FC<HeaderProps> = ({
               {currentUser.photoURL ? (
                 <img
                   src={currentUser.photoURL}
-                  alt={currentUser.name}
+                  alt={currentUser.name || 'User'}
                   className="w-7 h-7 rounded-full object-cover border border-white/20"
+                  referrerPolicy="no-referrer"
                 />
               ) : (
-                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-rose-500 to-amber-500 flex items-center justify-center text-white text-xs font-bold">
-                  {currentUser.name.charAt(0)}
+                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-rose-500 to-amber-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                  {(currentUser.name || 'ইউ').charAt(0)}
                 </div>
               )}
               <span className="hidden sm:inline-block text-xs font-semibold max-w-[100px] truncate">
-                {currentUser.name}
+                {currentUser.name || 'ইউজার'}
               </span>
             </div>
           )}

@@ -42,7 +42,7 @@ export const PartnerBar: React.FC<PartnerBarProps> = ({
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>আমার স্পেস (My Space)</span>
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-black/30 font-medium">
-              {toBengaliNumber(myTracker.todayCompletionRate)}%
+              {toBengaliNumber(myTracker?.todayCompletionRate ?? 0)}%
             </span>
           </button>
 
@@ -74,10 +74,10 @@ export const PartnerBar: React.FC<PartnerBarProps> = ({
             <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-xl border border-white/5">
               <div className="flex items-center -space-x-2">
                 <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-rose-500 to-amber-500 flex items-center justify-center text-white text-[11px] font-bold border-2 border-[#101626]">
-                  {currentUser.name.charAt(0)}
+                  {(currentUser.name || 'ইউ').charAt(0)}
                 </div>
                 <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-500 to-cyan-500 flex items-center justify-center text-white text-[11px] font-bold border-2 border-[#101626]">
-                  {(currentUser.partnerName || 'P').charAt(0)}
+                  {(currentUser.partnerName || 'পা').charAt(0)}
                 </div>
               </div>
               <div className="text-left">

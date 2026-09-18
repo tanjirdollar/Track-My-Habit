@@ -6,13 +6,15 @@ import { sound } from '../services/notifications';
 interface CelebrationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  streakCount: number;
+  streakCount?: number;
+  habitName?: string;
 }
 
 export const CelebrationModal: React.FC<CelebrationModalProps> = ({
   isOpen,
   onClose,
-  streakCount,
+  streakCount = 7,
+  habitName,
 }) => {
   useEffect(() => {
     if (isOpen) {

@@ -23,8 +23,10 @@ export const HabitCard: React.FC<HabitCardProps> = ({
   onOpenLogModal,
   onDelete,
 }) => {
-  const isDone = habit.completed || (habit.target > 0 && habit.current >= habit.target);
-  const percent = habit.target > 0 ? Math.min(100, Math.round((habit.current / habit.target) * 100)) : (habit.completed ? 100 : 0);
+  const currentVal = typeof habit.current === 'number' && !isNaN(habit.current) ? habit.current : 0;
+  const targetVal = typeof habit.target === 'number' && !isNaN(habit.target) && habit.target > 0 ? habit.target : 1;
+  const isDone = Boolean(habit.completed || (targetVal > 0 && currentVal >= targetVal));
+  const percent = targetVal > 0 ? Math.min(100, Math.round((currentVal / targetVal) * 100)) : (isDone ? 100 : 0);
 
   const handleReadOnlyClick = () => {
     showToast(

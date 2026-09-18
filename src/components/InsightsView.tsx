@@ -10,8 +10,8 @@ interface InsightsViewProps {
 }
 
 export const InsightsView: React.FC<InsightsViewProps> = ({ myTracker, partnerTracker }) => {
-  const myHealth = myTracker.healthScore || 80;
-  const partnerHealth = partnerTracker?.healthScore || 0;
+  const myHealth = myTracker?.healthScore ?? 80;
+  const partnerHealth = partnerTracker?.healthScore ?? 0;
   const avgHealth = partnerTracker ? Math.round((myHealth + partnerHealth) / 2) : myHealth;
 
   const getStatusText = (s: number) => {
@@ -29,11 +29,14 @@ export const InsightsView: React.FC<InsightsViewProps> = ({ myTracker, partnerTr
     const { dayName, dateNum } = formatShortDay(d);
     const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-    const myHist = myTracker.history?.[dateKey];
+    const myHist = myTracker?.history?.[dateKey];
     const partnerHist = partnerTracker?.history?.[dateKey];
 
-    const myDone = myHist ? myHist.rate >= 80 : (i === 6 ? myTracker.todayCompletionRate >= 80 : (i % 2 === 0));
-    const partnerDone = partnerHist ? partnerHist.rate >= 80 : (i === 6 ? (partnerTracker?.todayCompletionRate || 0) >= 80 : (i % 3 !== 0));
+    const myRate = myTracker?.todayCompletionRate ?? 0;
+    const partnerRate = partnerTracker?.todayCompletionRate ?? 0;
+
+    const myDone = myHist ? myHist.rate >= 80 : (i === 6 ? myRate >= 80 : (i % 2 === 0));
+    const partnerDone = partnerHist ? partnerHist.rate >= 80 : (i === 6 ? partnerRate >= 80 : (i % 3 !== 0));
     const isFullSync = myDone && (partnerTracker ? partnerDone : myDone);
     const isToday = i === 6;
 

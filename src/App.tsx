@@ -54,6 +54,14 @@ export default function App() {
     return () => unsubAuth();
   }, []);
 
+  // Sync myTracker immediately when currentUser changes
+  useEffect(() => {
+    setMyTracker((prev) => {
+      if (prev && prev.userId === currentUser.uid) return prev;
+      return createInitialTracker(currentUser.uid, currentUser.name, currentUser.email);
+    });
+  }, [currentUser.uid, currentUser.name, currentUser.email]);
+
   // 2. Check for URL invite parameter on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -317,7 +325,7 @@ export default function App() {
       <Header
         currentUser={currentUser}
         connectionStatus={connectionStatus}
-        streak={myTracker.currentStreak}
+        streak={myTracker?.currentStreak ?? 0}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenConnect={() => setIsConnectOpen(true)}

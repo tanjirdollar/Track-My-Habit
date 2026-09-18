@@ -34,8 +34,7 @@ service cloud.firestore {
       // Read access: Allowed for the owner OR for the connected partner
       allow read: if isSignedIn() && (
         request.auth.uid == userId ||
-        resource.data.partnerUid == request.auth.uid ||
-        resource.data.userId == request.auth.uid
+        (resource != null && resource.data.partnerUid == request.auth.uid)
       );
 
       // Write access: STRICTLY RESTRICTED TO THE OWNER ONLY

@@ -200,6 +200,95 @@ export function calculateTrackerStats(habits: Habit[]) {
   return { completionRate, completedCount, totalCount, healthScore };
 }
 
+// Ensure tracker data is always valid, resilient, and non-empty
+export function normalizeTrackerData(
+  data: any,
+  fallbackUserId: string = 'demo_user_me',
+  fallbackName: string = 'ইউজার',
+  fallbackEmail: string = ''
+): UserTrackerData {
+  if (!data || typeof data !== 'object') {
+    return createInitialTracker(fallbackUserId, fallbackName, fallbackEmail);
+  }
+
+  const rawHabits = Array.isArray(data.habits) ? data.habits : [];
+  const habits: Habit[] = rawHabits.length > 0
+    ? rawHabits.map((h: any, idx: number) => ({
+        id: String(h?.id || `habit_${idx}_${Date.now()}`),
+        name: String(h?.name || 'দৈনিক লক্ষ্য'),
+        type: h?.type === 'boolean' ? 'boolean' : 'number',
+        target: typeof h?.target === 'number' && !isNaN(h.target) && h.target > 0 ? h.target : 1,
+        current: typeof h?.current === 'number' && !isNaN(h.current) ? Math.max(0, h.current) : 0,
+        unit: String(h?.unit || 'বার'),
+        frequency: h?.frequency || 'daily',
+        emoji: String(h?.emoji || '🎯'),
+        completed: Boolean(h?.completed || (h?.target > 0 && (h?.current || 0) >= h.target)),
+        createdAt: typeof h?.createdAt === 'number' ? h.createdAt : Date.now(),
+        updatedAt: typeof h?.updatedAt === 'number' ? h.updatedAt : Date.now(),
+      }))
+    : getDefaultHabits();
+
+  const stats = calculateTrackerStats(habits);
+  const safeStreak = typeof data.currentStreak === 'number' && !isNaN(data.currentStreak) ? data.currentStreak : 7;
+  const safeBestStreak = typeof data.bestStreak === 'number' && !isNaN(data.bestStreak) ? data.bestStreak : Math.max(14, safeStreak);
+
+  return {
+    userId: String(data.userId || fallbackUserId),
+    userName: String(data.userName || fallbackName),
+    userEmail: String(data.userEmail || fallbackEmail),
+    partnerUid: data.partnerUid ? String(data.partnerUid) : null,
+    habits,
+    currentStreak: safeStreak,
+    bestStreak: safeBestStreak,
+    healthScore: typeof data.healthScore === 'number' && !isNaN(data.healthScore) ? data.healthScore : stats.healthScore,
+    todayCompletionRate: typeof data.todayCompletionRate === 'number' && !isNaN(data.todayCompletionRate) ? data.todayCompletionRate : stats.completionRate,
+    todayCompletedCount: typeof data.todayCompletedCount === 'number' && !isNaN(data.todayCompletedCount) ? data.todayCompletedCount : stats.completedCount,
+    todayTotalCount: typeof data.todayTotalCount === 'number' && !isNaN(data.todayTotalCount) ? data.todayTotalCount : stats.totalCount,
+    lastAction: data.lastAction && typeof data.lastAction === 'object' ? {
+      actionText: String(data.lastAction.actionText || 'অগ্রগতি আপডেট করা হয়েছে'),
+      timestamp: typeof data.lastAction.timestamp === 'number' ? data.lastAction.timestamp : Date.now(),
+    } : {
+      actionText: 'ট্র্যাকার চালু আছে',
+      timestamp: Date.now(),
+    },
+    history: data.history && typeof data.history === 'object' ? data.history : {
+      [getTodayKey()]: {
+        completedCount: stats.completedCount,
+        totalCount: stats.totalCount,
+        rate: stats.completionRate,
+      },
+    },
+    lastUpdated: typeof data.lastUpdated === 'number' ? data.lastUpdated : Date.now(),
+  };
+}
+
+// Ensure user profile is always fully populated and safe
+export function normalizeUserProfile(
+  profile: any,
+  fallbackUid: string = 'demo_user_me',
+  fallbackName: string = 'ইউজার'
+): UserProfile {
+  if (!profile || typeof profile !== 'object') {
+    return getDemoUserProfile();
+  }
+  const uid = String(profile.uid || fallbackUid);
+  const name = String(profile.name || fallbackName || 'ইউজার');
+  const inviteCode = String(profile.inviteCode || ('POD-' + uid.substring(0, 4).toUpperCase()));
+
+  return {
+    uid,
+    name,
+    email: String(profile.email || ''),
+    photoURL: profile.photoURL ? String(profile.photoURL) : '',
+    inviteCode,
+    partnerUid: profile.partnerUid ? String(profile.partnerUid) : null,
+    partnerName: profile.partnerName ? String(profile.partnerName) : null,
+    partnerEmail: profile.partnerEmail ? String(profile.partnerEmail) : null,
+    partnerPhoto: profile.partnerPhoto ? String(profile.partnerPhoto) : null,
+    updatedAt: typeof profile.updatedAt === 'number' ? profile.updatedAt : Date.now(),
+  };
+}
+
 // Initial tracker object
 export function createInitialTracker(userId: string, userName: string, userEmail: string): UserTrackerData {
   const habits = getDefaultHabits();
@@ -207,8 +296,8 @@ export function createInitialTracker(userId: string, userName: string, userEmail
 
   return {
     userId,
-    userName,
-    userEmail,
+    userName: userName || 'আমি',
+    userEmail: userEmail || '',
     partnerUid: null,
     habits,
     currentStreak: 7,
@@ -241,7 +330,8 @@ export function getSavedUserProfile(): UserProfile | null {
   const stored = localStorage.getItem(LOCAL_USER_PROFILE_KEY);
   if (!stored) return null;
   try {
-    return JSON.parse(stored);
+    const parsed = JSON.parse(stored);
+    return normalizeUserProfile(parsed);
   } catch {
     return null;
   }
@@ -282,23 +372,29 @@ export async function syncUserProfileOnLogin(user: FirebaseUser): Promise<UserPr
   try {
     const snap = await getDoc(userRef);
     if (snap.exists()) {
-      const data = snap.data() as UserProfile;
-      const updated: UserProfile = {
+      const data = snap.data();
+      const updated = normalizeUserProfile({
         ...data,
-        name: user.displayName || data.name || 'ইউজার',
-        email: user.email || data.email || '',
-        photoURL: user.photoURL || data.photoURL || '',
+        uid: user.uid,
+        name: user.displayName || data?.name || user.email?.split('@')[0] || 'ইউজার',
+        email: user.email || data?.email || '',
+        photoURL: user.photoURL || data?.photoURL || '',
         updatedAt: Date.now(),
-      };
-      await setDoc(userRef, updated, { merge: true });
+      });
       saveUserProfileLocal(updated);
+
+      try {
+        await setDoc(userRef, updated, { merge: true });
+      } catch (saveErr) {
+        console.warn('Could not persist updated profile to Firestore:', saveErr);
+      }
       return updated;
     } else {
       // New user
       const inviteCode = generateInviteCode();
-      const newProfile: UserProfile = {
+      const newProfile = normalizeUserProfile({
         uid: user.uid,
-        name: user.displayName || 'ইউজার',
+        name: user.displayName || user.email?.split('@')[0] || 'ইউজার',
         email: user.email || '',
         photoURL: user.photoURL || '',
         inviteCode,
@@ -307,17 +403,26 @@ export async function syncUserProfileOnLogin(user: FirebaseUser): Promise<UserPr
         partnerEmail: null,
         partnerPhoto: null,
         updatedAt: Date.now(),
-      };
+      });
 
-      await setDoc(userRef, newProfile);
       saveUserProfileLocal(newProfile);
 
+      try {
+        await setDoc(userRef, newProfile);
+      } catch (createErr) {
+        console.warn('Could not write new profile to Firestore:', createErr);
+      }
+
       // Create initial tracker document for this user
-      const trackerRef = doc(db, 'user_trackers', user.uid);
-      const trackerSnap = await getDoc(trackerRef);
-      if (!trackerSnap.exists()) {
-        const initialTracker = createInitialTracker(user.uid, newProfile.name, newProfile.email);
-        await setDoc(trackerRef, initialTracker);
+      try {
+        const trackerRef = doc(db, 'user_trackers', user.uid);
+        const trackerSnap = await getDoc(trackerRef);
+        if (!trackerSnap.exists()) {
+          const initialTracker = createInitialTracker(user.uid, newProfile.name, newProfile.email);
+          await setDoc(trackerRef, initialTracker);
+        }
+      } catch (trackerErr) {
+        console.warn('Could not initialize tracker document in Firestore:', trackerErr);
       }
 
       return newProfile;
@@ -325,15 +430,15 @@ export async function syncUserProfileOnLogin(user: FirebaseUser): Promise<UserPr
   } catch (err) {
     console.error('Error syncing user profile in Firestore:', err);
     // Return fallback profile if offline/permission issue
-    const fallback: UserProfile = {
+    const fallback = normalizeUserProfile({
       uid: user.uid,
-      name: user.displayName || 'ইউজার',
+      name: user.displayName || user.email?.split('@')[0] || 'ইউজার',
       email: user.email || '',
       photoURL: user.photoURL || '',
       inviteCode: 'POD-' + user.uid.substring(0, 4).toUpperCase(),
       partnerUid: null,
       updatedAt: Date.now(),
-    };
+    });
     saveUserProfileLocal(fallback);
     return fallback;
   }
@@ -482,29 +587,41 @@ export function subscribeToMyTracker(
     async (snap) => {
       onStatusChange?.('connected');
       if (snap.exists()) {
-        const data = snap.data() as UserTrackerData;
+        const raw = snap.data();
+        const data = normalizeTrackerData(raw, userId, userProfile.name, userProfile.email);
         localStorage.setItem(LOCAL_MY_TRACKER_KEY, JSON.stringify(data));
         onData(data);
       } else {
         // Document does not exist yet; bootstrap it!
         const initial = createInitialTracker(userId, userProfile.name, userProfile.email);
         initial.partnerUid = userProfile.partnerUid || null;
-        await setDoc(trackerRef, initial);
         localStorage.setItem(LOCAL_MY_TRACKER_KEY, JSON.stringify(initial));
         onData(initial);
+
+        try {
+          await setDoc(trackerRef, initial);
+        } catch (writeErr) {
+          console.warn('Could not write initial tracker to Firestore (using local):', writeErr);
+        }
       }
       initialLoad = false;
     },
     (err) => {
       console.warn('Firestore subscription error (My Tracker):', err);
       onStatusChange?.('error');
-      // Fallback to local storage
+      // Fallback to local storage or clean initial tracker
       const stored = localStorage.getItem(LOCAL_MY_TRACKER_KEY);
+      let fallbackData: UserTrackerData;
       if (stored) {
         try {
-          onData(JSON.parse(stored));
-        } catch {}
+          fallbackData = normalizeTrackerData(JSON.parse(stored), userId, userProfile.name, userProfile.email);
+        } catch {
+          fallbackData = createInitialTracker(userId, userProfile.name, userProfile.email);
+        }
+      } else {
+        fallbackData = createInitialTracker(userId, userProfile.name, userProfile.email);
       }
+      onData(fallbackData);
     }
   );
 
@@ -520,7 +637,7 @@ export async function updateMyTracker(
   const now = Date.now();
   const todayKey = getTodayKey();
 
-  const finalData: UserTrackerData = {
+  const finalData: UserTrackerData = normalizeTrackerData({
     ...updatedData,
     healthScore: stats.healthScore,
     todayCompletionRate: stats.completionRate,
@@ -535,7 +652,7 @@ export async function updateMyTracker(
         rate: stats.completionRate,
       },
     },
-  };
+  }, userId, updatedData.userName, updatedData.userEmail);
 
   // Local storage save
   localStorage.setItem(LOCAL_MY_TRACKER_KEY, JSON.stringify(finalData));
@@ -609,7 +726,8 @@ export function subscribeToPartnerTracker(
     partnerRef,
     (snap) => {
       if (snap.exists()) {
-        const data = snap.data() as UserTrackerData;
+        const raw = snap.data();
+        const data = normalizeTrackerData(raw, partnerUid, 'পার্টনার');
         onData(data);
 
         // If partner completed an action, trigger real-time sound/toast alert
