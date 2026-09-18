@@ -8,6 +8,7 @@ interface ConnectPartnerModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: UserProfile;
+  initialInviteCode?: string;
   onPartnerConnected: (partner: UserProfile) => void;
   onPartnerDisconnected: () => void;
 }
@@ -16,14 +17,22 @@ export const ConnectPartnerModal: React.FC<ConnectPartnerModalProps> = ({
   isOpen,
   onClose,
   currentUser,
+  initialInviteCode,
   onPartnerConnected,
   onPartnerDisconnected,
 }) => {
-  const [partnerInput, setPartnerInput] = useState('');
+  const [partnerInput, setPartnerInput] = useState(initialInviteCode || '');
   const [loading, setLoading] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Sync initialInviteCode whenever it changes or modal opens
+  React.useEffect(() => {
+    if (initialInviteCode && !partnerInput) {
+      setPartnerInput(initialInviteCode);
+    }
+  }, [initialInviteCode, isOpen]);
 
   if (!isOpen) return null;
 
@@ -111,9 +120,26 @@ export const ConnectPartnerModal: React.FC<ConnectPartnerModalProps> = ({
         </div>
 
         <div className="p-4 sm:p-6 space-y-5 overflow-y-auto">
+          {/* Invite Link Detected Banner */}
+          {initialInviteCode && (
+            <div className="p-3.5 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-xs flex items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span>ইনভাইট লিংক থেকে কোড পাওয়া গেছে: <strong className="text-white font-mono">{initialInviteCode}</strong></span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPartnerInput(initialInviteCode)}
+                className="px-2.5 py-1 rounded-lg bg-indigo-500 text-white font-bold text-[10px] hover:bg-indigo-400 cursor-pointer"
+              >
+                ব্যবহার করুন
+              </button>
+            </div>
+          )}
+
           {/* Error Banner */}
           {errorMessage && (
-            <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2.5">
+            <div className="p-3.5 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2.5">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
               <div className="leading-relaxed">{errorMessage}</div>
             </div>

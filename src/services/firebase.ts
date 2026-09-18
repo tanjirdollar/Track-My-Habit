@@ -766,23 +766,86 @@ export interface PairPartnerResult {
   partner?: UserProfile;
 }
 
+// Normalize invite code inputs: strip extra spaces, uppercase, ensure POD- prefix
+export function normalizeInviteCode(input: string): string {
+  if (!input) return '';
+  let clean = input.trim().replace(/\s+/g, '').toUpperCase();
+  // If user only typed 4-character suffix like "SH7W", add "POD-"
+  if (!clean.includes('-') && !clean.startsWith('POD') && clean.length === 4) {
+    clean = 'POD-' + clean;
+  } else if (clean.startsWith('POD') && !clean.startsWith('POD-')) {
+    clean = 'POD-' + clean.slice(3);
+  }
+  return clean;
+}
+
+// Auto-link current user with an incoming partner (called reactively when partner links to currentUser)
+export async function syncMyProfileWithPartner(currentUser: UserProfile, partnerData: UserProfile): Promise<UserProfile> {
+  const updated: UserProfile = {
+    ...currentUser,
+    partnerUid: partnerData.uid,
+    partnerName: partnerData.name,
+    partnerEmail: partnerData.email,
+    partnerPhoto: partnerData.photoURL || null,
+    updatedAt: Date.now(),
+  };
+
+  saveUserProfileLocal(updated);
+
+  if (!currentUser.uid.startsWith('demo_')) {
+    try {
+      const db = getFirestoreDb();
+      const myUserRef = doc(db, 'users', currentUser.uid);
+      await setDoc(
+        myUserRef,
+        {
+          partnerUid: partnerData.uid,
+          partnerName: partnerData.name,
+          partnerEmail: partnerData.email,
+          partnerPhoto: partnerData.photoURL || null,
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+
+      const myTrackerRef = doc(db, 'user_trackers', currentUser.uid);
+      await setDoc(myTrackerRef, { partnerUid: partnerData.uid }, { merge: true });
+    } catch (err) {
+      console.warn('Could not persist auto-linked partner to Firestore:', err);
+    }
+  }
+
+  sound.playCompletion();
+  showToast(
+    'পার্টনার আপনার সাথে যুক্ত হয়েছেন! 🤝',
+    `${partnerData.name}-এর সাথে লাইভ সিঙ্ক শুরু হয়েছে।`,
+    'celebrate'
+  );
+
+  return updated;
+}
+
 export async function connectPartnerByCodeOrEmail(
   currentUser: UserProfile,
   codeOrEmailInput: string
 ): Promise<PairPartnerResult> {
-  const queryTerm = codeOrEmailInput.trim();
-  if (!queryTerm) {
+  const rawInput = codeOrEmailInput.trim();
+  if (!rawInput) {
     return { success: false, message: 'অনুগ্রহ করে পার্টনারের কোড বা ইমেইল লিখুন।' };
   }
 
+  const isEmail = rawInput.includes('@');
+  const normalizedQuery = isEmail ? rawInput.toLowerCase() : normalizeInviteCode(rawInput);
+  const normalizedMyCode = normalizeInviteCode(currentUser.inviteCode);
+
   // Cannot connect to self
   if (
-    queryTerm.toUpperCase() === currentUser.inviteCode.toUpperCase() ||
-    (currentUser.email && queryTerm.toLowerCase() === currentUser.email.toLowerCase())
+    (!isEmail && (normalizedQuery === normalizedMyCode || normalizedQuery === currentUser.inviteCode.toUpperCase())) ||
+    (isEmail && currentUser.email && normalizedQuery === currentUser.email.toLowerCase())
   ) {
     return {
       success: false,
-      message: 'আপনি নিজের কোড বা ইমেইল দিয়ে নিজের সাথে যুক্ত হতে পারবেন না। আপনার পার্টনারের কোড লিখুন।',
+      message: 'আপনি নিজের কোড বা ইমেইল দিয়ে নিজের সাথে যুক্ত হতে পারবেন না। আপনার পার্টনারের কোড দিন।',
     };
   }
 
@@ -790,9 +853,9 @@ export async function connectPartnerByCodeOrEmail(
   if (currentUser.uid.startsWith('demo_')) {
     const demoPartner: UserProfile = {
       uid: 'demo_user_partner',
-      name: queryTerm.includes('@') ? queryTerm.split('@')[0] : 'পার্টনার (Duo)',
-      email: queryTerm.includes('@') ? queryTerm : 'partner@mail.com',
-      inviteCode: queryTerm.toUpperCase(),
+      name: isEmail ? rawInput.split('@')[0] : 'পার্টনার (Duo)',
+      email: isEmail ? rawInput : 'partner@mail.com',
+      inviteCode: normalizedQuery,
       partnerUid: currentUser.uid,
       partnerName: currentUser.name,
       partnerEmail: currentUser.email,
@@ -815,26 +878,36 @@ export async function connectPartnerByCodeOrEmail(
 
     let partnerDocSnap: any = null;
 
-    if (queryTerm.includes('@')) {
+    if (isEmail) {
       // Query by email
-      const qEmail = query(usersCol, where('email', '==', queryTerm.toLowerCase()));
+      const qEmail = query(usersCol, where('email', '==', normalizedQuery));
       const snap = await getDocs(qEmail);
       if (!snap.empty) {
         partnerDocSnap = snap.docs[0];
       }
     } else {
-      // Query by invite code (case-insensitive search by normalized uppercase)
-      const qCode = query(usersCol, where('inviteCode', '==', queryTerm.toUpperCase()));
-      const snap = await getDocs(qCode);
+      // Query by normalized invite code (e.g. POD-SH7W)
+      const qCode = query(usersCol, where('inviteCode', '==', normalizedQuery));
+      let snap = await getDocs(qCode);
       if (!snap.empty) {
         partnerDocSnap = snap.docs[0];
+      } else {
+        // Fallback: search with raw input trimmed and uppercase
+        const rawUpper = rawInput.replace(/\s*-\s*/g, '-').toUpperCase();
+        if (rawUpper !== normalizedQuery) {
+          const qFallback = query(usersCol, where('inviteCode', '==', rawUpper));
+          snap = await getDocs(qFallback);
+          if (!snap.empty) {
+            partnerDocSnap = snap.docs[0];
+          }
+        }
       }
     }
 
     if (!partnerDocSnap) {
       return {
         success: false,
-        message: `"${queryTerm}" দিয়ে কোনো অ্যাকাউন্ট পাওয়া যায়নি। পার্টনারকে এই অ্যাপে গুগল দিয়ে লগইন করতে বলুন এবং তার স্ক্রিনে থাকা কোডটি সংগ্রহ করুন।`,
+        message: `"${isEmail ? rawInput : normalizedQuery}" দিয়ে কোনো অ্যাকাউন্ট পাওয়া যায়নি। আপনার পার্টনারকে এই অ্যাপে গুগল দিয়ে লগইন করতে বলুন এবং তার স্ক্রিনে থাকা কোডটি সংগ্রহ করুন।`,
       };
     }
 
@@ -844,7 +917,7 @@ export async function connectPartnerByCodeOrEmail(
       return { success: false, message: 'আপনি নিজের সাথে কানেক্ট করতে পারবেন না।' };
     }
 
-    // Update current user doc in Firestore
+    // 1. Update current user's profile in Firestore (OWNER WRITE - ALWAYS SUCCEEDS)
     const myUserRef = doc(db, 'users', currentUser.uid);
     await setDoc(
       myUserRef,
@@ -858,28 +931,36 @@ export async function connectPartnerByCodeOrEmail(
       { merge: true }
     );
 
-    // Update partner doc in Firestore
-    const partnerUserRef = doc(db, 'users', partnerData.uid);
-    await setDoc(
-      partnerUserRef,
-      {
-        partnerUid: currentUser.uid,
-        partnerName: currentUser.name,
-        partnerEmail: currentUser.email,
-        partnerPhoto: currentUser.photoURL || null,
-        updatedAt: Date.now(),
-      },
-      { merge: true }
-    );
-
-    // Update partnerUid in both user_trackers documents
+    // 2. Update current user's tracker in Firestore (OWNER WRITE - ALWAYS SUCCEEDS)
     const myTrackerRef = doc(db, 'user_trackers', currentUser.uid);
     await setDoc(myTrackerRef, { partnerUid: partnerData.uid }, { merge: true });
 
-    const partnerTrackerRef = doc(db, 'user_trackers', partnerData.uid);
-    await setDoc(partnerTrackerRef, { partnerUid: currentUser.uid }, { merge: true });
+    // 3. Attempt to also update partner's doc (safely catch if security rules restrict to owner only)
+    try {
+      const partnerUserRef = doc(db, 'users', partnerData.uid);
+      await setDoc(
+        partnerUserRef,
+        {
+          partnerUid: currentUser.uid,
+          partnerName: currentUser.name,
+          partnerEmail: currentUser.email,
+          partnerPhoto: currentUser.photoURL || null,
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      console.log('Cross-user profile write skipped (partner device will auto-link reactively):', e);
+    }
 
-    // Update local profile
+    try {
+      const partnerTrackerRef = doc(db, 'user_trackers', partnerData.uid);
+      await setDoc(partnerTrackerRef, { partnerUid: currentUser.uid }, { merge: true });
+    } catch (e) {
+      console.log('Cross-user tracker write skipped (partner device will auto-link reactively):', e);
+    }
+
+    // 4. Update local profile state
     currentUser.partnerUid = partnerData.uid;
     currentUser.partnerName = partnerData.name;
     currentUser.partnerEmail = partnerData.email;
@@ -896,9 +977,13 @@ export async function connectPartnerByCodeOrEmail(
     };
   } catch (err: any) {
     console.error('Error connecting partner:', err);
+    let errorMsg = err?.message || String(err);
+    if (errorMsg.includes('permission') || errorMsg.includes('Missing or insufficient permissions')) {
+      errorMsg = 'Firestore নিরাপত্তা নিয়মের কারণে পার্টনার খোঁজা যায়নি। অনুগ্রহ করে Firebase Console থেকে Rules আপডেট করুন (Settings-এ নির্দেশিকা দেওয়া আছে)।';
+    }
     return {
       success: false,
-      message: 'পার্টনার কানেক্ট করার সময় ত্রুটি ঘটেছে: ' + (err.message || String(err)),
+      message: 'পার্টনার কানেক্ট করার সময় ত্রুটি ঘটেছে: ' + errorMsg,
     };
   }
 }
@@ -916,6 +1001,7 @@ export async function disconnectPartner(currentUser: UserProfile): Promise<void>
   if (!currentUser.uid.startsWith('demo_')) {
     try {
       const db = getFirestoreDb();
+      // Reset own user profile
       const myUserRef = doc(db, 'users', currentUser.uid);
       await setDoc(
         myUserRef,
@@ -929,25 +1015,35 @@ export async function disconnectPartner(currentUser: UserProfile): Promise<void>
         { merge: true }
       );
 
+      // Reset own tracker
       const myTrackerRef = doc(db, 'user_trackers', currentUser.uid);
       await setDoc(myTrackerRef, { partnerUid: null }, { merge: true });
 
+      // Safely attempt to reset partner's doc without throwing if rules restrict cross-user writes
       if (partnerUid && !partnerUid.startsWith('demo_')) {
-        const partnerUserRef = doc(db, 'users', partnerUid);
-        await setDoc(
-          partnerUserRef,
-          {
-            partnerUid: null,
-            partnerName: null,
-            partnerEmail: null,
-            partnerPhoto: null,
-            updatedAt: Date.now(),
-          },
-          { merge: true }
-        );
+        try {
+          const partnerUserRef = doc(db, 'users', partnerUid);
+          await setDoc(
+            partnerUserRef,
+            {
+              partnerUid: null,
+              partnerName: null,
+              partnerEmail: null,
+              partnerPhoto: null,
+              updatedAt: Date.now(),
+            },
+            { merge: true }
+          );
+        } catch (e) {
+          console.log('Cross-user unlink profile skipped:', e);
+        }
 
-        const partnerTrackerRef = doc(db, 'user_trackers', partnerUid);
-        await setDoc(partnerTrackerRef, { partnerUid: null }, { merge: true });
+        try {
+          const partnerTrackerRef = doc(db, 'user_trackers', partnerUid);
+          await setDoc(partnerTrackerRef, { partnerUid: null }, { merge: true });
+        } catch (e) {
+          console.log('Cross-user unlink tracker skipped:', e);
+        }
       }
     } catch (err) {
       console.error('Error disconnecting partner:', err);

@@ -8,7 +8,12 @@ import {
   updateMyTracker,
   createInitialTracker,
   calculateTrackerStats,
+  normalizeInviteCode,
+  syncMyProfileWithPartner,
+  saveUserProfileLocal,
+  getFirestoreDb,
 } from './services/firebase';
+import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { Header } from './components/Header';
 import { PartnerBar } from './components/PartnerBar';
 import { DashboardView } from './components/DashboardView';
@@ -38,6 +43,7 @@ export default function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isConnectOpen, setIsConnectOpen] = useState(false);
+  const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
   const [isAddGoalOpen, setIsAddGoalOpen] = useState(false);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const [selectedHabitForLog, setSelectedHabitForLog] = useState<Habit | null>(null);
@@ -67,8 +73,12 @@ export default function App() {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const invite = params.get('invite');
-      if (invite && invite !== currentUser.inviteCode) {
-        setIsConnectOpen(true);
+      if (invite) {
+        const cleaned = normalizeInviteCode(invite);
+        if (cleaned && cleaned !== normalizeInviteCode(currentUser.inviteCode)) {
+          setPendingInviteCode(cleaned);
+          setIsConnectOpen(true);
+        }
       }
     }
   }, [currentUser.inviteCode]);
@@ -108,6 +118,65 @@ export default function App() {
 
     return () => unsub();
   }, [currentUser.partnerUid, currentUser.partnerName]);
+
+  // 5. Reactive Partner Synchronization Listener (Peer Sync across devices)
+  useEffect(() => {
+    if (!currentUser.uid || currentUser.uid.startsWith('demo_')) return;
+
+    const db = getFirestoreDb();
+
+    // A: Listen to currentUser's own document in Firestore for any partner field updates
+    const myDocRef = doc(db, 'users', currentUser.uid);
+    const unsubMyDoc = onSnapshot(
+      myDocRef,
+      (snap) => {
+        if (snap.exists()) {
+          const remote = snap.data() as UserProfile;
+          if (remote.partnerUid && remote.partnerUid !== currentUser.partnerUid) {
+            setCurrentUser((prev) => {
+              const updated: UserProfile = {
+                ...prev,
+                partnerUid: remote.partnerUid,
+                partnerName: remote.partnerName || prev.partnerName,
+                partnerEmail: remote.partnerEmail || prev.partnerEmail,
+                partnerPhoto: remote.partnerPhoto || prev.partnerPhoto,
+              };
+              saveUserProfileLocal(updated);
+              return updated;
+            });
+          }
+        }
+      },
+      (err) => {
+        console.warn('My profile snapshot listener notice:', err);
+      }
+    );
+
+    // B: Listen for incoming partner connection where another user has chosen currentUser as partner
+    const qIncoming = query(collection(db, 'users'), where('partnerUid', '==', currentUser.uid));
+    const unsubIncoming = onSnapshot(
+      qIncoming,
+      async (snap) => {
+        if (!snap.empty) {
+          const partnerDoc = snap.docs[0];
+          const incomingPartner = partnerDoc.data() as UserProfile;
+          if (currentUser.partnerUid !== incomingPartner.uid) {
+            // Auto-link back safely on current user's document
+            const linked = await syncMyProfileWithPartner(currentUser, incomingPartner);
+            setCurrentUser(linked);
+          }
+        }
+      },
+      (err) => {
+        console.warn('Incoming partner link listener notice:', err);
+      }
+    );
+
+    return () => {
+      unsubMyDoc();
+      unsubIncoming();
+    };
+  }, [currentUser.uid, currentUser.partnerUid]);
 
   // Trigger celebration confetti
   const triggerConfetti = () => {
@@ -438,6 +507,7 @@ export default function App() {
         isOpen={isConnectOpen}
         onClose={() => setIsConnectOpen(false)}
         currentUser={currentUser}
+        initialInviteCode={pendingInviteCode || undefined}
         onPartnerConnected={(partner) => {
           setCurrentUser((prev) => ({
             ...prev,

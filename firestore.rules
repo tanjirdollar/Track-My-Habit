@@ -28,14 +28,11 @@ service cloud.firestore {
 
     // Independent habit trackers
     // Strictly Enforces:
-    // 1. Owner can read and write their own tracker
-    // 2. Connected partner can ONLY READ (Read-Only access). No partner can write or delete!
+    // 1. Any signed-in user can read (allowing partners to observe habits and streak progress in real-time)
+    // 2. Write access: STRICTLY RESTRICTED TO THE OWNER ONLY! The partner cannot modify, tick, or delete any habit!
     match /user_trackers/{userId} {
-      // Read access: Allowed for the owner OR for the connected partner
-      allow read: if isSignedIn() && (
-        request.auth.uid == userId ||
-        (resource != null && resource.data.partnerUid == request.auth.uid)
-      );
+      // Read access: Allowed for any signed-in user
+      allow read: if isSignedIn();
 
       // Write access: STRICTLY RESTRICTED TO THE OWNER ONLY
       // The partner is 100% blocked from modifying, ticking, or deleting any habit!
