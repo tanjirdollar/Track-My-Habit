@@ -32,17 +32,19 @@ import type {
   DuoMessage,
   PartnerNudge,
 } from '../types';
+import appletFirebaseConfig from '../../firebase-applet-config.json';
 import { sound, showToast } from './notifications';
 import { getTodayKey } from '../utils/bengali';
 
-// The user's provided Firebase Configuration
+// The provisioned Firebase Configuration
 export const DEFAULT_FIREBASE_CONFIG: FirebaseConfig = {
-  apiKey: "AIzaSyAtXRuBiyVwXgTFqMfH6gVWrZyvrMox0ec",
-  authDomain: "habit-tracker-931a6-ff2dc.firebaseapp.com",
-  projectId: "habit-tracker-931a6-ff2dc",
-  storageBucket: "habit-tracker-931a6-ff2dc.firebasestorage.app",
-  messagingSenderId: "480443471496",
-  appId: "1:480443471496:web:87fb7783d452875b18f13d",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || appletFirebaseConfig.apiKey || "AIzaSyDBBMpHeO9ZYnfh7CH0Inth8wzxbFB8384",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || appletFirebaseConfig.authDomain || "plexiform-collector-mxjsq.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || appletFirebaseConfig.projectId || "plexiform-collector-mxjsq",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || appletFirebaseConfig.storageBucket || "plexiform-collector-mxjsq.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || appletFirebaseConfig.messagingSenderId || "564360075572",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || appletFirebaseConfig.appId || "1:564360075572:web:538cd09f0f5c3a8e86ad61",
+  firestoreDatabaseId: (appletFirebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId,
 };
 
 const CONFIG_STORAGE_KEY = 'duo_pod_firebase_config';
@@ -71,7 +73,12 @@ export function getFirebaseApp(): FirebaseApp {
 export function getFirestoreDb(): Firestore {
   if (!firestoreDb) {
     const app = getFirebaseApp();
-    firestoreDb = getFirestore(app);
+    const config = getSavedFirebaseConfig() || DEFAULT_FIREBASE_CONFIG;
+    if (config.firestoreDatabaseId && config.firestoreDatabaseId !== '(default)') {
+      firestoreDb = getFirestore(app, config.firestoreDatabaseId);
+    } else {
+      firestoreDb = getFirestore(app);
+    }
   }
   return firestoreDb;
 }
@@ -90,14 +97,24 @@ export function getSavedFirebaseConfig(): FirebaseConfig | null {
   const stored = localStorage.getItem(CONFIG_STORAGE_KEY);
   if (!stored) return null;
   try {
-    return JSON.parse(stored);
+    const parsed = JSON.parse(stored);
+    // If stored config belongs to an old project and not the newly provisioned project, fallback to default
+    if (appletFirebaseConfig?.projectId && parsed.projectId && parsed.projectId !== appletFirebaseConfig.projectId) {
+      localStorage.removeItem(CONFIG_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
 }
 
-export function saveFirebaseConfig(config: FirebaseConfig) {
-  localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+export function saveFirebaseConfig(config: FirebaseConfig | null) {
+  if (!config) {
+    localStorage.removeItem(CONFIG_STORAGE_KEY);
+  } else {
+    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+  }
   firebaseApp = null;
   firestoreDb = null;
   firebaseAuth = null;
