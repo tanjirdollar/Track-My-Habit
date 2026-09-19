@@ -72,6 +72,11 @@ class SoundFx {
     this.playPartnerUpdate();
   }
 
+  // General notification sound
+  playNotification() {
+    this.playPartnerUpdate();
+  }
+
   // Partner sync chime
   playPartnerUpdate() {
     try {
@@ -99,7 +104,7 @@ class SoundFx {
 
 export const sound = new SoundFx();
 
-export type ToastType = 'success' | 'info' | 'warning' | 'celebrate';
+export type ToastType = 'success' | 'info' | 'warning' | 'error' | 'celebrate';
 
 export interface ToastMessage {
   id: string;

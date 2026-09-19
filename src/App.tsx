@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { UserProfile, UserTrackerData, Habit, ConnectionStatus } from './types';
+import type { UserProfile, UserTrackerData, Habit, ConnectionStatus, DuoMessage, PartnerNudge } from './types';
 import {
   getDemoUserProfile,
   subscribeToAuth,
@@ -12,6 +12,13 @@ import {
   syncMyProfileWithPartner,
   saveUserProfileLocal,
   getFirestoreDb,
+  resetTrackerProgressToZero,
+  sendDuoMessage,
+  subscribeToDuoChat,
+  sendNudgeToPartner,
+  subscribeToPartnerNudges,
+  sendBrowserNotification,
+  requestNotificationPermission,
 } from './services/firebase';
 import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { Header } from './components/Header';
@@ -24,6 +31,8 @@ import { CelebrationModal } from './components/CelebrationModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ConnectPartnerModal } from './components/ConnectPartnerModal';
 import { AuthModal } from './components/AuthModal';
+import { NudgeModal } from './components/NudgeModal';
+import { DuoChatModal } from './components/DuoChatModal';
 import { ToastBanner } from './components/ToastBanner';
 import { sound, showToast } from './services/notifications';
 import { CheckCircle, Users, BarChart3, Sparkles } from 'lucide-react';
@@ -49,6 +58,11 @@ export default function App() {
   const [selectedHabitForLog, setSelectedHabitForLog] = useState<Habit | null>(null);
   const [isCelebrationOpen, setIsCelebrationOpen] = useState(false);
   const [celebrationHabitName, setCelebrationHabitName] = useState('');
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isNudgeOpen, setIsNudgeOpen] = useState(false);
+  const [selectedNudgeHabit, setSelectedNudgeHabit] = useState<Habit | null>(null);
+  const [chatMessages, setChatMessages] = useState<DuoMessage[]>([]);
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
 
   // 1. Subscribe to Firebase Auth
   useEffect(() => {
@@ -132,7 +146,11 @@ export default function App() {
       (snap) => {
         if (snap.exists()) {
           const remote = snap.data() as UserProfile;
-          if (remote.partnerUid && remote.partnerUid !== currentUser.partnerUid) {
+          if (
+            remote.partnerUid &&
+            remote.partnerUid !== currentUser.partnerUid &&
+            !currentUser.disconnectedPartnerUids?.includes(remote.partnerUid)
+          ) {
             setCurrentUser((prev) => {
               const updated: UserProfile = {
                 ...prev,
@@ -160,7 +178,10 @@ export default function App() {
         if (!snap.empty) {
           const partnerDoc = snap.docs[0];
           const incomingPartner = partnerDoc.data() as UserProfile;
-          if (currentUser.partnerUid !== incomingPartner.uid) {
+          if (
+            currentUser.partnerUid !== incomingPartner.uid &&
+            !currentUser.disconnectedPartnerUids?.includes(incomingPartner.uid)
+          ) {
             // Auto-link back safely on current user's document
             const linked = await syncMyProfileWithPartner(currentUser, incomingPartner);
             setCurrentUser(linked);
@@ -176,7 +197,45 @@ export default function App() {
       unsubMyDoc();
       unsubIncoming();
     };
+  }, [currentUser.uid, currentUser.partnerUid, currentUser.disconnectedPartnerUids]);
+
+  // 6. Subscribe to Partner Nudges (Live Motivation & Reminders)
+  useEffect(() => {
+    if (!currentUser.partnerUid) return;
+
+    const unsub = subscribeToPartnerNudges(currentUser.uid, (nudge) => {
+      const title = `${nudge.senderName} তাগিদ পাঠিয়েছেন! ${nudge.emoji || '🔔'}`;
+      sound.playNotification();
+      showToast(title, nudge.message, 'info');
+      sendBrowserNotification(title, nudge.message);
+    });
+
+    return () => unsub();
   }, [currentUser.uid, currentUser.partnerUid]);
+
+  // 7. Subscribe to Duo Live Chat
+  useEffect(() => {
+    if (!currentUser.partnerUid) {
+      setChatMessages([]);
+      return;
+    }
+
+    const unsub = subscribeToDuoChat(currentUser.uid, currentUser.partnerUid, (msgs) => {
+      setChatMessages(msgs);
+      if (!isChatOpen && msgs.length > 0) {
+        const last = msgs[msgs.length - 1];
+        if (last.senderUid !== currentUser.uid) {
+          setUnreadMessagesCount((prev) => prev + 1);
+          sound.playNotification();
+          const title = `${currentUser.partnerName || 'পার্টনার'} থেকে নতুন বার্তা 💬`;
+          showToast(title, last.text, 'info');
+          sendBrowserNotification(title, last.text);
+        }
+      }
+    });
+
+    return () => unsub();
+  }, [currentUser.uid, currentUser.partnerUid, currentUser.partnerName, isChatOpen]);
 
   // Trigger celebration confetti
   const triggerConfetti = () => {
@@ -385,6 +444,39 @@ export default function App() {
     [myTracker, currentUser.uid]
   );
 
+  // Reset Progress to Zero (User requested: ডিফল্ট প্রগ্রেস শূন্য করে দেওয়া)
+  const handleResetProgress = useCallback(async () => {
+    await resetTrackerProgressToZero(currentUser.uid);
+    const cleanTracker = createInitialTracker(currentUser.uid, currentUser.name, currentUser.email);
+    setMyTracker(cleanTracker);
+    sound.playTick();
+    showToast('প্রগ্রেস রিসেট করা হয়েছে', 'সকল অভ্যাসের অগ্রগতি শূন্য (০) থেকে শুরু হবে।', 'info');
+  }, [currentUser.uid, currentUser.name, currentUser.email]);
+
+  // Send Nudge / Reminder to Partner
+  const handleSendNudge = useCallback(
+    async (message: string, habitName?: string, emoji?: string) => {
+      if (!currentUser.partnerUid) {
+        showToast('কোনো পার্টনার যুক্ত নেই', 'তাগিদ পাঠাতে প্রথমে পার্টনার কানেক্ট করুন।', 'error');
+        return false;
+      }
+      return await sendNudgeToPartner(currentUser, currentUser.partnerUid, message, habitName, emoji);
+    },
+    [currentUser]
+  );
+
+  // Send Live Duo Chat Message to Partner
+  const handleSendMessage = useCallback(
+    async (text: string) => {
+      if (!currentUser.partnerUid) {
+        showToast('কোনো পার্টনার যুক্ত নেই', 'মেসেজ পাঠাতে প্রথমে পার্টনার কানেক্ট করুন।', 'error');
+        return false;
+      }
+      return await sendDuoMessage(currentUser, currentUser.partnerUid, text);
+    },
+    [currentUser]
+  );
+
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col selection:bg-rose-500 selection:text-white">
       {/* Toast Notifications container */}
@@ -412,6 +504,15 @@ export default function App() {
           onTabChange={setActiveTab}
           onOpenConnectModal={() => setIsConnectOpen(true)}
           connectionStatus={connectionStatus}
+          onOpenChat={() => {
+            setIsChatOpen(true);
+            setUnreadMessagesCount(0);
+          }}
+          onOpenNudge={() => {
+            setSelectedNudgeHabit(null);
+            setIsNudgeOpen(true);
+          }}
+          unreadMessagesCount={unreadMessagesCount}
         />
 
         {/* View 1: My Space (Full Edit Access) */}
@@ -429,6 +530,10 @@ export default function App() {
               setIsLogModalOpen(true);
             }}
             onDeleteHabit={handleDeleteGoal}
+            onNudgeHabit={(h) => {
+              setSelectedNudgeHabit(h || null);
+              setIsNudgeOpen(true);
+            }}
           />
         )}
 
@@ -440,6 +545,10 @@ export default function App() {
             partnerName={currentUser.partnerName || 'পার্টনার'}
             isConnected={!!currentUser.partnerUid}
             onOpenConnectModal={() => setIsConnectOpen(true)}
+            onNudgeHabit={(h) => {
+              setSelectedNudgeHabit(h || null);
+              setIsNudgeOpen(true);
+            }}
           />
         )}
 
@@ -526,6 +635,7 @@ export default function App() {
           }));
           setPartnerTracker(null);
         }}
+        onProgressReset={handleResetProgress}
       />
 
       <AddGoalModal
@@ -560,6 +670,31 @@ export default function App() {
         }}
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenConnect={() => setIsConnectOpen(true)}
+        onResetProgress={handleResetProgress}
+      />
+
+      <NudgeModal
+        isOpen={isNudgeOpen}
+        onClose={() => {
+          setIsNudgeOpen(false);
+          setSelectedNudgeHabit(null);
+        }}
+        partnerName={currentUser.partnerName || 'পার্টনার'}
+        habitName={selectedNudgeHabit?.name}
+        onSendNudge={handleSendNudge}
+      />
+
+      <DuoChatModal
+        isOpen={isChatOpen}
+        onClose={() => {
+          setIsChatOpen(false);
+          setUnreadMessagesCount(0);
+        }}
+        currentUser={currentUser}
+        partnerName={currentUser.partnerName || 'পার্টনার'}
+        partnerPhoto={currentUser.partnerPhoto}
+        messages={chatMessages}
+        onSendMessage={handleSendMessage}
       />
     </div>
   );

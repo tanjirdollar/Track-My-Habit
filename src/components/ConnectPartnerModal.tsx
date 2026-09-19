@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, Users, Link2, Unlink, Sparkles, ShieldCheck, Mail, AlertCircle } from 'lucide-react';
+import { X, Copy, Check, Users, Link2, Unlink, Sparkles, ShieldCheck, Mail, AlertCircle, RotateCcw } from 'lucide-react';
 import type { UserProfile } from '../types';
-import { connectPartnerByCodeOrEmail, disconnectPartner } from '../services/firebase';
+import { connectPartnerByCodeOrEmail, disconnectPartner, resetTrackerProgressToZero } from '../services/firebase';
 import { showToast, sound } from '../services/notifications';
 
 interface ConnectPartnerModalProps {
@@ -11,6 +11,7 @@ interface ConnectPartnerModalProps {
   initialInviteCode?: string;
   onPartnerConnected: (partner: UserProfile) => void;
   onPartnerDisconnected: () => void;
+  onProgressReset?: () => void;
 }
 
 export const ConnectPartnerModal: React.FC<ConnectPartnerModalProps> = ({
@@ -20,12 +21,14 @@ export const ConnectPartnerModal: React.FC<ConnectPartnerModalProps> = ({
   initialInviteCode,
   onPartnerConnected,
   onPartnerDisconnected,
+  onProgressReset,
 }) => {
   const [partnerInput, setPartnerInput] = useState(initialInviteCode || '');
   const [loading, setLoading] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [resetProgressOnConnect, setResetProgressOnConnect] = useState(true);
 
   // Sync initialInviteCode whenever it changes or modal opens
   React.useEffect(() => {
@@ -70,6 +73,10 @@ export const ConnectPartnerModal: React.FC<ConnectPartnerModalProps> = ({
     try {
       const result = await connectPartnerByCodeOrEmail(currentUser, partnerInput.trim());
       if (result.success && result.partner) {
+        if (resetProgressOnConnect) {
+          await resetTrackerProgressToZero(currentUser.uid);
+          onProgressReset?.();
+        }
         onPartnerConnected(result.partner);
         onClose();
       } else {
@@ -230,6 +237,20 @@ export const ConnectPartnerModal: React.FC<ConnectPartnerModalProps> = ({
                 className="w-full px-3.5 py-2.5 rounded-xl bg-[#0c101c] border border-white/10 text-white placeholder:text-slate-500 text-sm focus:outline-none focus:border-indigo-500 font-mono tracking-wider"
               />
             </div>
+
+            {/* Option to start progress at zero */}
+            <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-black/20 border border-white/5 cursor-pointer text-xs text-slate-300 hover:bg-black/30 transition-colors">
+              <input
+                type="checkbox"
+                checked={resetProgressOnConnect}
+                onChange={(e) => setResetProgressOnConnect(e.target.checked)}
+                className="rounded accent-indigo-500 w-4 h-4 cursor-pointer"
+              />
+              <span className="flex items-center gap-1.5 leading-snug">
+                <RotateCcw className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>নতুন পার্টনারের সাথে প্রগ্রেস রিসেট করে ০% থেকে শুরু করুন</span>
+              </span>
+            </label>
 
             <button
               type="submit"

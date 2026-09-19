@@ -23,7 +23,15 @@ import {
   type Auth,
   type User as FirebaseUser,
 } from 'firebase/auth';
-import type { FirebaseConfig, Habit, ConnectionStatus, UserProfile, UserTrackerData } from '../types';
+import type {
+  FirebaseConfig,
+  Habit,
+  ConnectionStatus,
+  UserProfile,
+  UserTrackerData,
+  DuoMessage,
+  PartnerNudge,
+} from '../types';
 import { sound, showToast } from './notifications';
 import { getTodayKey } from '../utils/bengali';
 
@@ -39,6 +47,7 @@ export const DEFAULT_FIREBASE_CONFIG: FirebaseConfig = {
 
 const CONFIG_STORAGE_KEY = 'duo_pod_firebase_config';
 const LOCAL_MY_TRACKER_KEY = 'duo_my_tracker_data';
+const LOCAL_PARTNER_TRACKER_KEY = 'duo_partner_tracker_data';
 const LOCAL_USER_PROFILE_KEY = 'duo_user_profile_data';
 
 let firebaseApp: FirebaseApp | null = null;
@@ -94,7 +103,7 @@ export function saveFirebaseConfig(config: FirebaseConfig) {
   firebaseAuth = null;
 }
 
-// Default habits template for any new user
+// Default habits template for any new user (starts strictly at 0% progress)
 export function getDefaultHabits(): Habit[] {
   const now = Date.now();
   return [
@@ -103,7 +112,7 @@ export function getDefaultHabits(): Habit[] {
       name: 'পর্যাপ্ত পানি পান',
       type: 'number',
       target: 8,
-      current: 4,
+      current: 0,
       unit: 'গ্লাস',
       frequency: 'daily',
       emoji: '💧',
@@ -116,11 +125,11 @@ export function getDefaultHabits(): Habit[] {
       name: 'মর্নিং ওয়াক বা শরীরচর্চা',
       type: 'number',
       target: 30,
-      current: 30,
+      current: 0,
       unit: 'মিনিট',
       frequency: 'daily',
       emoji: '🏃‍♂️',
-      completed: true,
+      completed: false,
       createdAt: now,
       updatedAt: now,
     },
@@ -129,7 +138,7 @@ export function getDefaultHabits(): Habit[] {
       name: 'বই বা আর্টিকেল পাঠ',
       type: 'number',
       target: 15,
-      current: 10,
+      current: 0,
       unit: 'পৃষ্ঠা',
       frequency: 'daily',
       emoji: '📚',
@@ -142,11 +151,11 @@ export function getDefaultHabits(): Habit[] {
       name: 'ধ্যান ও মাইন্ডফুলনেস',
       type: 'boolean',
       target: 1,
-      current: 1,
+      current: 0,
       unit: 'বার',
       frequency: 'daily',
       emoji: '🧘‍♂️',
-      completed: true,
+      completed: false,
       createdAt: now,
       updatedAt: now,
     },
@@ -229,8 +238,8 @@ export function normalizeTrackerData(
     : getDefaultHabits();
 
   const stats = calculateTrackerStats(habits);
-  const safeStreak = typeof data.currentStreak === 'number' && !isNaN(data.currentStreak) ? data.currentStreak : 7;
-  const safeBestStreak = typeof data.bestStreak === 'number' && !isNaN(data.bestStreak) ? data.bestStreak : Math.max(14, safeStreak);
+  const safeStreak = typeof data.currentStreak === 'number' && !isNaN(data.currentStreak) ? data.currentStreak : 0;
+  const safeBestStreak = typeof data.bestStreak === 'number' && !isNaN(data.bestStreak) ? data.bestStreak : safeStreak;
 
   return {
     userId: String(data.userId || fallbackUserId),
@@ -248,16 +257,10 @@ export function normalizeTrackerData(
       actionText: String(data.lastAction.actionText || 'অগ্রগতি আপডেট করা হয়েছে'),
       timestamp: typeof data.lastAction.timestamp === 'number' ? data.lastAction.timestamp : Date.now(),
     } : {
-      actionText: 'ট্র্যাকার চালু আছে',
+      actionText: 'ট্র্যাকার চালু আছে (০% থেকে শুরু)',
       timestamp: Date.now(),
     },
-    history: data.history && typeof data.history === 'object' ? data.history : {
-      [getTodayKey()]: {
-        completedCount: stats.completedCount,
-        totalCount: stats.totalCount,
-        rate: stats.completionRate,
-      },
-    },
+    history: data.history && typeof data.history === 'object' ? data.history : {},
     lastUpdated: typeof data.lastUpdated === 'number' ? data.lastUpdated : Date.now(),
   };
 }
@@ -285,14 +288,15 @@ export function normalizeUserProfile(
     partnerName: profile.partnerName ? String(profile.partnerName) : null,
     partnerEmail: profile.partnerEmail ? String(profile.partnerEmail) : null,
     partnerPhoto: profile.partnerPhoto ? String(profile.partnerPhoto) : null,
+    disconnectedPartnerUids: Array.isArray(profile.disconnectedPartnerUids) ? profile.disconnectedPartnerUids : [],
+    unlinkedAt: typeof profile.unlinkedAt === 'number' ? profile.unlinkedAt : 0,
     updatedAt: typeof profile.updatedAt === 'number' ? profile.updatedAt : Date.now(),
   };
 }
 
-// Initial tracker object
+// Initial tracker object - strictly starts at 0%
 export function createInitialTracker(userId: string, userName: string, userEmail: string): UserTrackerData {
   const habits = getDefaultHabits();
-  const stats = calculateTrackerStats(habits);
 
   return {
     userId,
@@ -300,25 +304,68 @@ export function createInitialTracker(userId: string, userName: string, userEmail
     userEmail: userEmail || '',
     partnerUid: null,
     habits,
-    currentStreak: 7,
-    bestStreak: 14,
-    healthScore: stats.healthScore,
-    todayCompletionRate: stats.completionRate,
-    todayCompletedCount: stats.completedCount,
-    todayTotalCount: stats.totalCount,
+    currentStreak: 0,
+    bestStreak: 0,
+    healthScore: 0,
+    todayCompletionRate: 0,
+    todayCompletedCount: 0,
+    todayTotalCount: habits.length,
     lastAction: {
-      actionText: 'নতুন ট্র্যাকার শুরু করেছেন',
+      actionText: 'নতুন ট্র্যাকার প্রস্তুত (০% প্রগ্রেস)',
       timestamp: Date.now(),
     },
-    history: {
-      [getTodayKey()]: {
-        completedCount: stats.completedCount,
-        totalCount: stats.totalCount,
-        rate: stats.completionRate,
-      },
-    },
+    history: {},
     lastUpdated: Date.now(),
   };
+}
+
+// Reset all progress and habits strictly to 0
+export async function resetTrackerProgressToZero(
+  userId: string,
+  userProfile?: Partial<UserProfile>
+): Promise<UserTrackerData> {
+  const habits = getDefaultHabits().map((h) => ({
+    ...h,
+    current: 0,
+    completed: false,
+    updatedAt: Date.now(),
+  }));
+
+  const resetTracker: UserTrackerData = {
+    userId,
+    userName: userProfile?.name || 'আমি',
+    userEmail: userProfile?.email || '',
+    userPhoto: userProfile?.photoURL,
+    partnerUid: userProfile?.partnerUid || null,
+    habits,
+    currentStreak: 0,
+    bestStreak: 0,
+    healthScore: 0,
+    todayCompletionRate: 0,
+    todayCompletedCount: 0,
+    todayTotalCount: habits.length,
+    lastAction: {
+      actionText: 'সকল প্রগ্রেস শূন্য (০) করা হয়েছে',
+      timestamp: Date.now(),
+    },
+    history: {},
+    lastUpdated: Date.now(),
+  };
+
+  localStorage.setItem(LOCAL_MY_TRACKER_KEY, JSON.stringify(resetTracker));
+
+  if (!userId.startsWith('demo_')) {
+    try {
+      const db = getFirestoreDb();
+      const trackerRef = doc(db, 'user_trackers', userId);
+      await setDoc(trackerRef, resetTracker, { merge: false });
+    } catch (err) {
+      console.warn('Could not reset tracker in Firestore:', err);
+    }
+  }
+
+  showToast('প্রগ্রেস শূন্য করা হয়েছে ✨', 'সকল অভ্যাসের আজকের প্রগ্রেস ও হিস্ট্রি ০% থেকে শুরু হচ্ছে।', 'info');
+  return resetTracker;
 }
 
 // ----------------------------------------------------
@@ -352,12 +399,13 @@ export function getDemoUserProfile(): UserProfile {
 
   const demoUser: UserProfile = {
     uid: 'demo_user_me',
-    name: 'আমি (Demo)',
-    email: 'demo.user@mail.com',
+    name: 'আমি',
+    email: 'user@account.com',
     inviteCode: 'POD-7788',
-    partnerUid: 'demo_user_partner',
-    partnerName: 'পার্টনার (Demo)',
-    partnerEmail: 'partner.demo@mail.com',
+    partnerUid: null,
+    partnerName: null,
+    partnerEmail: null,
+    disconnectedPartnerUids: [],
     updatedAt: Date.now(),
   };
   saveUserProfileLocal(demoUser);
@@ -677,6 +725,32 @@ export async function updateMyTracker(
   }
 }
 
+// Web Push / Browser notification utilities
+export function requestNotificationPermission(): void {
+  if (typeof window !== 'undefined' && 'Notification' in window) {
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') {
+          showToast('নোটিফিকেশন সক্রিয় করা হয়েছে 🔔', 'পার্টনার কোনো টাস্ক শেষ করলে বা তাগিদ দিলে নোটিফিকেশন পাবেন।', 'info');
+        }
+      });
+    }
+  }
+}
+
+export function sendBrowserNotification(title: string, body: string): void {
+  if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification(title, {
+        body,
+        icon: 'https://cdn-icons-png.flaticon.com/512/9446/9446979.png',
+      });
+    } catch (e) {
+      console.warn('Browser notification error:', e);
+    }
+  }
+}
+
 // Subscribe to PARTNER'S tracker (Strict Read-Only)
 export function subscribeToPartnerTracker(
   partnerUid: string | null | undefined,
@@ -691,14 +765,6 @@ export function subscribeToPartnerTracker(
   // If demo partner
   if (partnerUid.startsWith('demo_')) {
     const demoPartnerTracker = createInitialTracker(partnerUid, 'পার্টনার (Demo)', 'partner.demo@mail.com');
-    // Set some sample progress for demonstration
-    if (demoPartnerTracker.habits[0]) demoPartnerTracker.habits[0].current = 6;
-    if (demoPartnerTracker.habits[2]) demoPartnerTracker.habits[2].current = 15;
-    if (demoPartnerTracker.habits[2]) demoPartnerTracker.habits[2].completed = true;
-    const stats = calculateTrackerStats(demoPartnerTracker.habits);
-    demoPartnerTracker.todayCompletionRate = stats.completionRate;
-    demoPartnerTracker.todayCompletedCount = stats.completedCount;
-    demoPartnerTracker.healthScore = stats.healthScore;
     onData(demoPartnerTracker);
 
     const channel = getBroadcastChannel();
@@ -707,6 +773,10 @@ export function subscribeToPartnerTracker(
         onData(e.data.tracker);
         if (e.data.tracker?.lastAction?.actionText) {
           onNotification?.(e.data.tracker.lastAction.actionText);
+          sendBrowserNotification(
+            `${e.data.tracker.userName || 'পার্টনার'} টাস্ক সম্পন্ন করেছেন! 🎉`,
+            e.data.tracker.lastAction.actionText
+          );
         }
       }
     };
@@ -730,16 +800,19 @@ export function subscribeToPartnerTracker(
         const data = normalizeTrackerData(raw, partnerUid, 'পার্টনার');
         onData(data);
 
-        // If partner completed an action, trigger real-time sound/toast alert
+        // If partner completed an action, trigger real-time sound/toast alert and browser notification
         if (data.lastAction && data.lastAction.timestamp > prevActionTime) {
           if (prevActionTime > 0) {
             sound.playBell();
+            const notificationTitle = `${data.userName || 'পার্টনার'} লক্ষ্য পূরণ করেছেন! 🌟`;
+            const notificationBody = data.lastAction.actionText || 'পার্টনার তার অগ্রগতির তথ্য আপডেট করেছেন।';
             showToast(
-              `${data.userName || 'পার্টনার'} লক্ষ্য পূরণ করেছেন! 🌟`,
-              data.lastAction.actionText || 'পার্টনার তার অগ্রগতির তথ্য আপডেট করেছেন।',
+              notificationTitle,
+              notificationBody,
               'celebrate'
             );
-            onNotification?.(data.lastAction.actionText);
+            sendBrowserNotification(notificationTitle, notificationBody);
+            onNotification?.(notificationBody);
           }
           prevActionTime = data.lastAction.timestamp;
         }
@@ -781,6 +854,12 @@ export function normalizeInviteCode(input: string): string {
 
 // Auto-link current user with an incoming partner (called reactively when partner links to currentUser)
 export async function syncMyProfileWithPartner(currentUser: UserProfile, partnerData: UserProfile): Promise<UserProfile> {
+  // If this partner was explicitly disconnected by current user, NEVER auto-reconnect!
+  if (currentUser.disconnectedPartnerUids && currentUser.disconnectedPartnerUids.includes(partnerData.uid)) {
+    console.log('Skipping auto-link because partner is in disconnected list:', partnerData.uid);
+    return currentUser;
+  }
+
   const updated: UserProfile = {
     ...currentUser,
     partnerUid: partnerData.uid,
@@ -918,6 +997,10 @@ export async function connectPartnerByCodeOrEmail(
     }
 
     // 1. Update current user's profile in Firestore (OWNER WRITE - ALWAYS SUCCEEDS)
+    const cleanDisconnected = (currentUser.disconnectedPartnerUids || []).filter(
+      (uid) => uid !== partnerData.uid
+    );
+
     const myUserRef = doc(db, 'users', currentUser.uid);
     await setDoc(
       myUserRef,
@@ -926,6 +1009,8 @@ export async function connectPartnerByCodeOrEmail(
         partnerName: partnerData.name,
         partnerEmail: partnerData.email,
         partnerPhoto: partnerData.photoURL || null,
+        disconnectedPartnerUids: cleanDisconnected,
+        unlinkedAt: 0,
         updatedAt: Date.now(),
       },
       { merge: true }
@@ -965,7 +1050,16 @@ export async function connectPartnerByCodeOrEmail(
     currentUser.partnerName = partnerData.name;
     currentUser.partnerEmail = partnerData.email;
     currentUser.partnerPhoto = partnerData.photoURL;
+    currentUser.disconnectedPartnerUids = cleanDisconnected;
+    currentUser.unlinkedAt = 0;
     saveUserProfileLocal(currentUser);
+
+    // Broadcast connection
+    const channel = getBroadcastChannel();
+    channel?.postMessage({
+      type: 'PARTNER_CONNECTED',
+      partner: partnerData,
+    });
 
     sound.playCompletion();
     showToast('পার্টনার সফলভাবে যুক্ত হয়েছে! 🤝', `${partnerData.name}-এর সাথে কানেক্ট সম্পন্ন।`, 'celebrate');
@@ -988,20 +1082,40 @@ export async function connectPartnerByCodeOrEmail(
   }
 }
 
-// Disconnect/Unpair Partner
-export async function disconnectPartner(currentUser: UserProfile): Promise<void> {
-  const partnerUid = currentUser.partnerUid;
+// Disconnect/Unpair Partner (with strict anti-auto-reconnect protection)
+export async function disconnectPartner(currentUser: UserProfile): Promise<UserProfile> {
+  const previousPartnerUid = currentUser.partnerUid;
+
+  // Track disconnected partners to prevent reactive listeners from auto-reconnecting immediately
+  const disconnectedList = Array.from(
+    new Set([
+      ...(currentUser.disconnectedPartnerUids || []),
+      ...(previousPartnerUid ? [previousPartnerUid] : []),
+    ])
+  );
 
   currentUser.partnerUid = null;
   currentUser.partnerName = null;
   currentUser.partnerEmail = null;
   currentUser.partnerPhoto = null;
+  currentUser.disconnectedPartnerUids = disconnectedList;
+  currentUser.unlinkedAt = Date.now();
+  currentUser.updatedAt = Date.now();
+
   saveUserProfileLocal(currentUser);
+  localStorage.removeItem(LOCAL_PARTNER_TRACKER_KEY);
+
+  // Broadcast disconnect across browser tabs
+  const channel = getBroadcastChannel();
+  channel?.postMessage({
+    type: 'PARTNER_DISCONNECTED',
+    previousPartnerUid,
+  });
 
   if (!currentUser.uid.startsWith('demo_')) {
     try {
       const db = getFirestoreDb();
-      // Reset own user profile
+      // Reset own user profile in Firestore
       const myUserRef = doc(db, 'users', currentUser.uid);
       await setDoc(
         myUserRef,
@@ -1010,19 +1124,21 @@ export async function disconnectPartner(currentUser: UserProfile): Promise<void>
           partnerName: null,
           partnerEmail: null,
           partnerPhoto: null,
+          disconnectedPartnerUids: disconnectedList,
+          unlinkedAt: Date.now(),
           updatedAt: Date.now(),
         },
         { merge: true }
       );
 
-      // Reset own tracker
+      // Reset own tracker in Firestore
       const myTrackerRef = doc(db, 'user_trackers', currentUser.uid);
       await setDoc(myTrackerRef, { partnerUid: null }, { merge: true });
 
-      // Safely attempt to reset partner's doc without throwing if rules restrict cross-user writes
-      if (partnerUid && !partnerUid.startsWith('demo_')) {
+      // Attempt to clear partner's user doc if possible
+      if (previousPartnerUid && !previousPartnerUid.startsWith('demo_')) {
         try {
-          const partnerUserRef = doc(db, 'users', partnerUid);
+          const partnerUserRef = doc(db, 'users', previousPartnerUid);
           await setDoc(
             partnerUserRef,
             {
@@ -1039,7 +1155,7 @@ export async function disconnectPartner(currentUser: UserProfile): Promise<void>
         }
 
         try {
-          const partnerTrackerRef = doc(db, 'user_trackers', partnerUid);
+          const partnerTrackerRef = doc(db, 'user_trackers', previousPartnerUid);
           await setDoc(partnerTrackerRef, { partnerUid: null }, { merge: true });
         } catch (e) {
           console.log('Cross-user unlink tracker skipped:', e);
@@ -1051,5 +1167,203 @@ export async function disconnectPartner(currentUser: UserProfile): Promise<void>
   }
 
   sound.playTick();
-  showToast('পার্টনারের সংযোগ বিচ্ছিন্ন করা হয়েছে', 'আপনি যেকোনো সময় আবার নতুন কোড দিয়ে কানেক্ট করতে পারবেন।', 'info');
+  showToast('পার্টনারের সংযোগ বিচ্ছিন্ন করা হয়েছে', 'আপনি যেকোনো সময় অন্য পার্টনারের কোড দিয়ে নতুন করে কানেক্ট করতে পারবেন।', 'info');
+  return currentUser;
+}
+
+// ----------------------------------------------------
+// NUDGE / MOTIVATION FEATURE
+// ----------------------------------------------------
+
+export async function sendNudgeToPartner(
+  sender: UserProfile,
+  receiverUid: string,
+  message: string,
+  habitName?: string,
+  emoji: string = '🔔'
+): Promise<boolean> {
+  const now = Date.now();
+  const nudge: PartnerNudge = {
+    id: 'nudge_' + now + '_' + Math.random().toString(36).substring(2, 7),
+    senderUid: sender.uid,
+    senderName: sender.name,
+    receiverUid,
+    habitName: habitName || undefined,
+    message,
+    emoji,
+    timestamp: now,
+    read: false,
+  };
+
+  // Broadcast to other tabs in same browser
+  const channel = getBroadcastChannel();
+  channel?.postMessage({
+    type: 'PARTNER_NUDGE',
+    nudge,
+  });
+
+  if (!sender.uid.startsWith('demo_')) {
+    try {
+      const db = getFirestoreDb();
+      await setDoc(doc(db, 'partner_nudges', nudge.id), nudge);
+    } catch (err) {
+      console.warn('Failed to send nudge to Firestore:', err);
+    }
+  }
+
+  sound.playTick();
+  showToast('তাগিদ পাঠানো হয়েছে! 🔔', `পার্টনারকে তাগিদ সফলভাবে পাঠানো হয়েছে।`, 'celebrate');
+  return true;
+}
+
+export function subscribeToPartnerNudges(
+  receiverUid: string,
+  onNudge: (nudge: PartnerNudge) => void
+): Unsubscribe {
+  if (!receiverUid) return () => {};
+
+  const channel = getBroadcastChannel();
+  const handleMessage = (e: MessageEvent) => {
+    if (e.data?.type === 'PARTNER_NUDGE' && e.data.nudge?.receiverUid === receiverUid) {
+      onNudge(e.data.nudge);
+    }
+  };
+  channel?.addEventListener('message', handleMessage);
+
+  if (receiverUid.startsWith('demo_')) {
+    return () => {
+      channel?.removeEventListener('message', handleMessage);
+    };
+  }
+
+  const db = getFirestoreDb();
+  const q = query(
+    collection(db, 'partner_nudges'),
+    where('receiverUid', '==', receiverUid)
+  );
+
+  let initialLoad = true;
+  const unsub = onSnapshot(
+    q,
+    (snap) => {
+      if (initialLoad) {
+        initialLoad = false;
+        return;
+      }
+      snap.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const data = change.doc.data() as PartnerNudge;
+          onNudge(data);
+        }
+      });
+    },
+    (err) => {
+      console.warn('Error subscribing to partner nudges:', err);
+    }
+  );
+
+  return () => {
+    channel?.removeEventListener('message', handleMessage);
+    unsub();
+  };
+}
+
+// ----------------------------------------------------
+// LIVE DUO CHAT / MESSAGING FEATURE
+// ----------------------------------------------------
+
+export function getChatRoomId(uid1: string, uid2: string): string {
+  return [uid1, uid2].sort().join('_');
+}
+
+export async function sendDuoMessage(
+  sender: UserProfile,
+  receiverUid: string,
+  text: string
+): Promise<boolean> {
+  if (!text.trim()) return false;
+  const now = Date.now();
+  const chatId = getChatRoomId(sender.uid, receiverUid);
+  const msg: DuoMessage = {
+    id: 'msg_' + now + '_' + Math.random().toString(36).substring(2, 7),
+    chatId,
+    senderUid: sender.uid,
+    senderName: sender.name,
+    senderPhoto: sender.photoURL,
+    receiverUid,
+    text: text.trim(),
+    timestamp: now,
+  };
+
+  const channel = getBroadcastChannel();
+  channel?.postMessage({
+    type: 'DUO_CHAT_MESSAGE',
+    msg,
+  });
+
+  if (!sender.uid.startsWith('demo_')) {
+    try {
+      const db = getFirestoreDb();
+      await setDoc(doc(db, 'duo_messages', msg.id), msg);
+    } catch (err) {
+      console.warn('Failed to send chat message to Firestore:', err);
+    }
+  }
+
+  sound.playTick();
+  return true;
+}
+
+export function subscribeToDuoChat(
+  currentUid: string,
+  partnerUid: string,
+  onMessages: (messages: DuoMessage[]) => void
+): Unsubscribe {
+  if (!currentUid || !partnerUid) {
+    onMessages([]);
+    return () => {};
+  }
+
+  const chatId = getChatRoomId(currentUid, partnerUid);
+  let localMessages: DuoMessage[] = [];
+
+  const channel = getBroadcastChannel();
+  const handleMessage = (e: MessageEvent) => {
+    if (e.data?.type === 'DUO_CHAT_MESSAGE' && e.data.msg?.chatId === chatId) {
+      localMessages.push(e.data.msg);
+      localMessages.sort((a, b) => a.timestamp - b.timestamp);
+      onMessages([...localMessages]);
+    }
+  };
+  channel?.addEventListener('message', handleMessage);
+
+  if (currentUid.startsWith('demo_') && partnerUid.startsWith('demo_')) {
+    return () => {
+      channel?.removeEventListener('message', handleMessage);
+    };
+  }
+
+  const db = getFirestoreDb();
+  const q = query(
+    collection(db, 'duo_messages'),
+    where('chatId', '==', chatId)
+  );
+
+  const unsub = onSnapshot(
+    q,
+    (snap) => {
+      const msgs = snap.docs.map((doc) => doc.data() as DuoMessage);
+      msgs.sort((a, b) => a.timestamp - b.timestamp);
+      localMessages = msgs;
+      onMessages(msgs);
+    },
+    (err) => {
+      console.warn('Error subscribing to duo chat:', err);
+    }
+  );
+
+  return () => {
+    channel?.removeEventListener('message', handleMessage);
+    unsub();
+  };
 }

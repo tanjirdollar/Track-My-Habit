@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, Plus, Minus, Lock, Flame, MoreVertical, Edit2, Trash2, Clock } from 'lucide-react';
+import { Check, Plus, Minus, Lock, Flame, MoreVertical, Edit2, Trash2, Clock, Bell, Sparkles } from 'lucide-react';
 import type { Habit } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
 import { showToast } from '../services/notifications';
@@ -12,6 +12,7 @@ interface HabitCardProps {
   onIncrement?: (id: string, delta: number) => void;
   onOpenLogModal?: (habit: Habit) => void;
   onDelete?: (id: string) => void;
+  onNudge?: (habit: Habit) => void;
 }
 
 export const HabitCard: React.FC<HabitCardProps> = ({
@@ -22,6 +23,7 @@ export const HabitCard: React.FC<HabitCardProps> = ({
   onIncrement,
   onOpenLogModal,
   onDelete,
+  onNudge,
 }) => {
   const currentVal = typeof habit.current === 'number' && !isNaN(habit.current) ? habit.current : 0;
   const targetVal = typeof habit.target === 'number' && !isNaN(habit.target) && habit.target > 0 ? habit.target : 1;
@@ -188,17 +190,41 @@ export const HabitCard: React.FC<HabitCardProps> = ({
           </div>
         </div>
       ) : (
-        <div
-          onClick={handleReadOnlyClick}
-          className="flex items-center justify-between pt-2 border-t border-white/5 text-[11px] text-indigo-300/80 cursor-pointer"
-        >
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-center justify-between pt-2.5 border-t border-white/5 text-[11px]">
+          <div
+            onClick={handleReadOnlyClick}
+            className="flex items-center gap-1.5 text-indigo-300/80 hover:text-indigo-200 cursor-pointer transition-colors"
+          >
             <Lock className="w-3 h-3 text-indigo-400" />
-            <span>পার্টনার ট্র্যাকিং (সুরক্ষিত রিড-ওনলি)</span>
+            <span>সুরক্ষিত রিড-ওনলি</span>
           </div>
-          <span className="text-slate-400">
-            {isDone ? 'সম্পন্ন হয়েছে' : 'চলমান...'}
-          </span>
+
+          {onNudge && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNudge(habit);
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs active:scale-95 transition-all cursor-pointer shadow-md ${
+                isDone
+                  ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 shadow-emerald-500/10'
+                  : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 shadow-amber-500/10'
+              }`}
+              title={isDone ? `${partnerName}-কে সাবাশ বলুন` : `${partnerName}-কে এই টাস্কটি করার জন্য তাগিদ দিন`}
+            >
+              {isDone ? (
+                <>
+                  <span>👏 সাবাশ জানান</span>
+                </>
+              ) : (
+                <>
+                  <Bell className="w-3.5 h-3.5 animate-bounce" />
+                  <span>তাগিদ দিন 🔔</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       )}
     </div>

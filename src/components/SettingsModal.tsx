@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, LogOut, LogIn, Users, Shield, Link2, ExternalLink, HelpCircle, CheckCircle } from 'lucide-react';
+import { X, Copy, Check, LogOut, LogIn, Users, Shield, Link2, ExternalLink, HelpCircle, CheckCircle, RotateCcw, Bell } from 'lucide-react';
 import type { UserProfile } from '../types';
-import { logoutUser, disconnectPartner } from '../services/firebase';
+import { logoutUser, disconnectPartner, requestNotificationPermission } from '../services/firebase';
 import { showToast, sound } from '../services/notifications';
 
 interface SettingsModalProps {
@@ -11,6 +11,7 @@ interface SettingsModalProps {
   onLogout: () => void;
   onOpenAuth: () => void;
   onOpenConnect: () => void;
+  onResetProgress?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -20,6 +21,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onLogout,
   onOpenAuth,
   onOpenConnect,
+  onResetProgress,
 }) => {
   const [copiedCode, setCopiedCode] = useState(false);
   const isDemo = currentUser.uid.startsWith('demo_');
@@ -209,6 +211,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </button>
               </div>
             )}
+          </div>
+
+          {/* Habit Progress & Notification Controls */}
+          <div className="p-4 rounded-2xl bg-[#0c101c] border border-white/5 space-y-3">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+              প্রগ্রেস ও নোটিফিকেশন নিয়ন্ত্রণ
+            </span>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              {onResetProgress && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('আপনি কি নিশ্চিত যে সকল অভ্যাসের প্রগ্রেস ও হিস্ট্রি রিসেট করে শূন্য (০) থেকে শুরু করতে চান?')) {
+                      onResetProgress();
+                      onClose();
+                    }
+                  }}
+                  className="flex-1 py-2.5 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>প্রগ্রেস ০% রিসেট করুন</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  requestNotificationPermission();
+                }}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 font-bold text-xs flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span>নোটিফিকেশন সক্রিয় করুন</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-snug">
+              পার্টনার কোনো টাস্ক শেষ করলে বা তাগিদ দিলে তাৎক্ষণিক রিয়েল-টাইম নোটিফিকেশন পাঠানো হবে।
+            </p>
           </div>
 
           {/* Firebase Configuration Info & Setup Instructions */}

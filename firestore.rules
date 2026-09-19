@@ -39,5 +39,17 @@ service cloud.firestore {
       allow create, update: if isOwner(userId);
       allow delete: if isOwner(userId);
     }
+
+    // Live Duo Chat messages between connected partners
+    match /duo_messages/{msgId} {
+      allow read, create: if isSignedIn();
+      allow update, delete: if isSignedIn() && request.auth.uid == resource.data.senderUid;
+    }
+
+    // Nudges and Motivation reminders between partners
+    match /partner_nudges/{nudgeId} {
+      allow read, create: if isSignedIn();
+      allow update, delete: if isSignedIn();
+    }
   }
 }

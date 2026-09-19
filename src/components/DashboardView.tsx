@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Flame, CheckCircle2, ShieldCheck, Lock, Users, Sparkles, Link2 } from 'lucide-react';
+import { Plus, Flame, CheckCircle2, ShieldCheck, Lock, Users, Sparkles, Link2, Bell } from 'lucide-react';
 import type { UserTrackerData, Habit } from '../types';
 import { HabitCard } from './HabitCard';
 import { toBengaliNumber } from '../utils/bengali';
@@ -15,6 +15,7 @@ interface DashboardViewProps {
   onOpenLogModal?: (habit: Habit) => void;
   onDeleteHabit?: (id: string) => void;
   onOpenConnectModal?: () => void;
+  onNudgeHabit?: (habit?: Habit | null) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -28,6 +29,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenLogModal,
   onDeleteHabit,
   onOpenConnectModal,
+  onNudgeHabit,
 }) => {
   // If viewing partner space but partner is not connected yet
   if (isReadOnly && (!isConnected || !tracker)) {
@@ -76,7 +78,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     <div className="space-y-6 animate-fade-in">
       {/* Space Notice Header if Read-Only */}
       {isReadOnly ? (
-        <div className="p-3.5 sm:p-4 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-between gap-3 text-xs text-indigo-200 shadow-lg">
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 flex flex-wrap items-center justify-between gap-3 text-xs text-indigo-200 shadow-lg">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-xl bg-indigo-500/30 flex items-center justify-center text-indigo-300">
               <Lock className="w-4 h-4" />
@@ -90,10 +92,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </p>
             </div>
           </div>
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            লাইভ
-          </span>
+          <div className="flex items-center gap-2 ml-auto">
+            {onNudgeHabit && (
+              <button
+                type="button"
+                onClick={() => onNudgeHabit(null)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs shadow-md shadow-amber-500/10 active:scale-95 transition-all cursor-pointer"
+                title={`${partnerName}-কে তাগিদ পাঠান`}
+              >
+                <Bell className="w-3.5 h-3.5 animate-bounce" />
+                <span>তাগিদ পাঠান 🔔</span>
+              </button>
+            )}
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              লাইভ
+            </span>
+          </div>
         </div>
       ) : null}
 
@@ -196,6 +211,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onIncrement={onIncrementHabit}
               onOpenLogModal={onOpenLogModal}
               onDelete={onDeleteHabit}
+              onNudge={onNudgeHabit}
             />
           ))}
         </div>

@@ -46,6 +46,12 @@
     "/user_trackers/{userId}": {
       "schema": "UserTrackerData",
       "description": "Individual habit tracker collection. Owner has full read/write; linked partner has strict read-only access"
+    },
+    "/duo_messages/{msgId}": {
+      "description": "Instant live chat messages between connected accountability partners"
+    },
+    "/partner_nudges/{nudgeId}": {
+      "description": "Nudges, reminders, and motivational cheers sent to partner"
     }
   }
 }

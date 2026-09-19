@@ -25,7 +25,33 @@ export interface UserProfile {
   partnerName?: string | null;
   partnerEmail?: string | null;
   partnerPhoto?: string | null;
+  disconnectedPartnerUids?: string[];
+  unlinkedAt?: number;
   updatedAt: number;
+}
+
+export interface DuoMessage {
+  id: string;
+  chatId: string;
+  senderUid: string;
+  senderName: string;
+  senderPhoto?: string;
+  receiverUid: string;
+  text: string;
+  timestamp: number;
+}
+
+export interface PartnerNudge {
+  id: string;
+  senderUid: string;
+  senderName: string;
+  receiverUid: string;
+  habitId?: string;
+  habitName?: string;
+  message: string;
+  emoji?: string;
+  timestamp: number;
+  read?: boolean;
 }
 
 export interface UserTrackerData {

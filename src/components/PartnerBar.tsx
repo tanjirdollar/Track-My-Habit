@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, Sparkles, Heart, ShieldCheck, UserCheck, Link2 } from 'lucide-react';
+import { Users, Sparkles, Heart, ShieldCheck, UserCheck, Link2, MessageSquare, Bell } from 'lucide-react';
 import type { UserProfile, UserTrackerData, ConnectionStatus } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
 
@@ -12,6 +12,9 @@ interface PartnerBarProps {
   onTabChange: (tab: 'my_space' | 'partner_space' | 'insights') => void;
   onOpenConnectModal: () => void;
   connectionStatus: ConnectionStatus;
+  onOpenChat?: () => void;
+  onOpenNudge?: () => void;
+  unreadMessagesCount?: number;
 }
 
 export const PartnerBar: React.FC<PartnerBarProps> = ({
@@ -23,6 +26,9 @@ export const PartnerBar: React.FC<PartnerBarProps> = ({
   onTabChange,
   onOpenConnectModal,
   connectionStatus,
+  onOpenChat,
+  onOpenNudge,
+  unreadMessagesCount = 0,
 }) => {
   const isConnected = !!currentUser.partnerUid && !!partnerTracker;
 
@@ -40,7 +46,7 @@ export const PartnerBar: React.FC<PartnerBarProps> = ({
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>আমার স্পেস (My Space)</span>
+            <span>আমার স্পেস</span>
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-black/30 font-medium">
               {toBengaliNumber(myTracker?.todayCompletionRate ?? 0)}%
             </span>
@@ -55,7 +61,7 @@ export const PartnerBar: React.FC<PartnerBarProps> = ({
             }`}
           >
             <Users className="w-3.5 h-3.5" />
-            <span>পার্টনারের স্পেস (Partner)</span>
+            <span>পার্টনার ভিউ</span>
             {isConnected ? (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-black/30 font-medium text-emerald-300">
                 {toBengaliNumber(partnerTracker?.todayCompletionRate || 0)}%
@@ -68,31 +74,58 @@ export const PartnerBar: React.FC<PartnerBarProps> = ({
           </button>
         </div>
 
-        {/* Right: Partner Sync Status Indicator */}
-        <div className="flex items-center justify-between sm:justify-end gap-2.5">
+        {/* Right: Actions & Partner Sync Status Indicator */}
+        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2">
           {isConnected ? (
-            <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-xl border border-white/5">
-              <div className="flex items-center -space-x-2">
-                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-rose-500 to-amber-500 flex items-center justify-center text-white text-[11px] font-bold border-2 border-[#101626]">
-                  {(currentUser.name || 'ইউ').charAt(0)}
+            <>
+              {/* Nudge Action Button */}
+              {onOpenNudge && (
+                <button
+                  type="button"
+                  onClick={onOpenNudge}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+                  title="পার্টনারকে তাগিদ বা অনুপ্রেরণা দিন"
+                >
+                  <Bell className="w-3.5 h-3.5 animate-bounce" />
+                  <span className="hidden xs:inline">তাগিদ দিন</span>
+                </button>
+              )}
+
+              {/* Live Chat Action Button */}
+              {onOpenChat && (
+                <button
+                  type="button"
+                  onClick={onOpenChat}
+                  className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-200 font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+                  title="পার্টনারের সাথে লাইভ চ্যাট"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>লাইভ চ্যাট</span>
+                  {unreadMessagesCount > 0 && (
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping absolute -top-1 -right-1" />
+                  )}
+                </button>
+              )}
+
+              <div className="flex items-center gap-2 bg-white/5 px-2.5 py-1.5 rounded-xl border border-white/5">
+                <div className="flex items-center -space-x-1.5">
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-rose-500 to-amber-500 flex items-center justify-center text-white text-[10px] font-bold border border-[#101626]">
+                    {(currentUser.name || 'ইউ').charAt(0)}
+                  </div>
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-500 to-cyan-500 flex items-center justify-center text-white text-[10px] font-bold border border-[#101626]">
+                    {(currentUser.partnerName || 'পা').charAt(0)}
+                  </div>
                 </div>
-                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-500 to-cyan-500 flex items-center justify-center text-white text-[11px] font-bold border-2 border-[#101626]">
-                  {(currentUser.partnerName || 'পা').charAt(0)}
+                <div className="text-left hidden sm:block">
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-bold text-white truncate max-w-[90px]">
+                      {currentUser.partnerName || 'পার্টনার'}
+                    </span>
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  </div>
                 </div>
               </div>
-              <div className="text-left">
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-bold text-white">
-                    {currentUser.partnerName || 'পার্টনার'}
-                  </span>
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                </div>
-                <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3 text-indigo-400" />
-                  <span>লাইভ সিঙ্ক চালু</span>
-                </div>
-              </div>
-            </div>
+            </>
           ) : (
             <button
               onClick={onOpenConnectModal}
